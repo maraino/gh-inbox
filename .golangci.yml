@@ -12,6 +12,15 @@ linters:
     - unconvert
     - unparam
     - usestdlibvars
+  exclusions:
+    presets:
+      # Unchecked errors from Close, fmt.Fprint* and similar.
+      - std-error-handling
+    rules:
+      # Test handlers write canned responses; a failed write fails the test anyway.
+      - path: _test\.go
+        linters:
+          - errcheck
 
 formatters:
   enable:
