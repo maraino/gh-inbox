@@ -96,7 +96,7 @@ them.`,
 	flags.BoolVar(&opts.noCache, "no-cache", false, "Ignore the local record of notifications already marked as done")
 	flags.BoolVar(&opts.verbose, "verbose", false, "Log API requests and retries to stderr")
 
-	cmd.AddCommand(newListCmd(opts, e))
+	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e))
 	return cmd
 }
 
