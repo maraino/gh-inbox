@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/auth"
@@ -85,6 +86,7 @@ them.`,
 		Annotations: map[string]string{
 			cobra.CommandDisplayNameAnnotation: "gh inbox",
 		},
+		Version:       version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -98,6 +100,15 @@ them.`,
 
 	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e))
 	return cmd
+}
+
+// version returns the module version the binary was built from: a tag such
+// as "v1.2.0", or a pseudo-version for a build between tags.
+func version() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "(devel)"
 }
 
 // host returns the GitHub host to use.
