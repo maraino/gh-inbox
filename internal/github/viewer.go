@@ -25,14 +25,14 @@ func (c *Client) Viewer(ctx context.Context) (inbox.Identity, error) {
 				Login string `json:"login"`
 			} `json:"organization"`
 		}
-		next, err := c.get(ctx, path, &page)
+		links, err := c.get(ctx, path, &page)
 		if err != nil {
 			return inbox.Identity{}, fmt.Errorf("listing your teams: %w", err)
 		}
 		for _, t := range page {
 			id.Teams = append(id.Teams, t.Organization.Login+"/"+t.Slug)
 		}
-		path = next
+		path = links["next"]
 	}
 	return id, nil
 }

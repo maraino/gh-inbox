@@ -93,8 +93,8 @@ func (c *Client) send(ctx context.Context, method, path string) error {
 }
 
 // get decodes the response of a REST endpoint into v. For paginated
-// endpoints, it also returns the URL of the next page, or "" on the last one.
-func (c *Client) get(ctx context.Context, path string, v any) (next string, err error) {
+// endpoints, it also returns the pagination links, such as "next" and "last".
+func (c *Client) get(ctx context.Context, path string, v any) (links map[string]string, err error) {
 	err = c.retry(ctx, func() error {
 		resp, err := c.rest.RequestWithContext(ctx, http.MethodGet, path, nil)
 		if err != nil {
@@ -104,22 +104,28 @@ func (c *Client) get(ctx context.Context, path string, v any) (next string, err 
 		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 			return fmt.Errorf("decoding %s: %w", path, err)
 		}
-		next = nextPage(resp.Header.Get("Link"))
+		links = parseLinks(resp.Header.Get("Link"))
 		return nil
 	})
-	return next, err
+	return links, err
 }
 
-// nextPage returns the "next" URL of a Link header, or "".
-func nextPage(link string) string {
-	for part := range strings.SplitSeq(link, ",") {
+// parseLinks returns the URLs of a Link header by relation, such as
+// "next".
+func parseLinks(header string) map[string]string {
+	links := make(map[string]string)
+	for part := range strings.SplitSeq(header, ",") {
 		target, params, ok := strings.Cut(strings.TrimSpace(part), ";")
-		if !ok || !strings.Contains(params, `rel="next"`) {
+		if !ok {
 			continue
 		}
-		return strings.Trim(strings.TrimSpace(target), "<>")
+		for param := range strings.SplitSeq(params, ";") {
+			if rel, ok := strings.CutPrefix(strings.TrimSpace(param), "rel="); ok {
+				links[strings.Trim(rel, `"`)] = strings.Trim(strings.TrimSpace(target), "<>")
+			}
+		}
 	}
-	return ""
+	return links
 }
 
 func (c *Client) logf(format string, args ...any) {

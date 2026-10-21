@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,24 +44,24 @@ func newTestClient(t *testing.T, handler http.Handler) (c *Client, slept *[]time
 	return c, slept
 }
 
-func TestNextPage(t *testing.T) {
+func TestParseLinks(t *testing.T) {
 	tests := []struct {
-		link string
-		want string
+		header string
+		want   map[string]string
 	}{
-		{link: "", want: ""},
+		{header: "", want: map[string]string{}},
 		{
-			link: `<https://api.github.com/notifications?page=2>; rel="next", <https://api.github.com/notifications?page=5>; rel="last"`,
-			want: "https://api.github.com/notifications?page=2",
+			header: `<https://api.github.com/notifications?page=2>; rel="next", <https://api.github.com/notifications?page=5>; rel="last"`,
+			want: map[string]string{
+				"next": "https://api.github.com/notifications?page=2",
+				"last": "https://api.github.com/notifications?page=5",
+			},
 		},
-		{
-			link: `<https://api.github.com/notifications?page=1>; rel="prev", <https://api.github.com/notifications?page=1>; rel="first"`,
-			want: "",
-		},
+		{header: "garbage", want: map[string]string{}},
 	}
 	for _, tt := range tests {
-		if got := nextPage(tt.link); got != tt.want {
-			t.Errorf("nextPage(%q) = %q, want %q", tt.link, got, tt.want)
+		if got := parseLinks(tt.header); !maps.Equal(got, tt.want) {
+			t.Errorf("parseLinks(%q) = %v, want %v", tt.header, got, tt.want)
 		}
 	}
 }
