@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -72,21 +73,22 @@ func (c *fakeClient) Unsubscribe(_ context.Context, id string) error { return c.
 //  3. a CI run
 //  4. a pull request that can't be read
 func newFakeInbox() *fakeClient {
-	pr := func(id, repo, title, url string, updated time.Duration) inbox.Notification {
+	pr := func(id, repo, title string, num int, updated time.Duration) inbox.Notification {
 		return inbox.Notification{
 			ID: id, Repo: repo, Type: inbox.TypePullRequest, Title: title, Reason: "review_requested",
-			UpdatedAt: now.Add(-updated), SubjectURL: url,
+			UpdatedAt: now.Add(-updated), SubjectURL: fmt.Sprintf("https://api.github.com/repos/%s/pulls/%d", repo, num),
+			Number: num,
 		}
 	}
 	return &fakeClient{
 		notifications: []inbox.Notification{
-			pr("1", "acme/api", "Merged fix", "https://api.github.com/repos/acme/api/pulls/1", time.Hour),
-			pr("2", "acme/web", "Open feature", "https://api.github.com/repos/acme/web/pulls/2", 2*time.Hour),
+			pr("1", "acme/api", "Merged fix", 1, time.Hour),
+			pr("2", "acme/web", "Open feature", 2, 2*time.Hour),
 			{
 				ID: "3", Repo: "acme/api", Type: inbox.TypeCheckSuite, Title: "CI failed", Reason: "ci_activity",
 				Unread: true, UpdatedAt: now.Add(-10 * 24 * time.Hour),
 			},
-			pr("4", "acme/gone", "Lost PR", "https://api.github.com/repos/acme/gone/pulls/4", 3*time.Hour),
+			pr("4", "acme/gone", "Lost PR", 4, 3*time.Hour),
 		},
 		details: map[string]*inbox.Subject{
 			"https://api.github.com/repos/acme/api/pulls/1": {Number: 1, State: inbox.StateMerged, Assignees: []string{"me"}},
@@ -131,32 +133,32 @@ func TestList(t *testing.T) {
 		{
 			name: "everything",
 			args: []string{"list"},
-			wantStdout: "acme/api\tpr\t-\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n" +
-				"acme/web\tpr\t-\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n" +
-				"acme/api\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n" +
-				"acme/gone\tpr\t-\treview_requested\t2026-10-20T09:00:00Z\tLost PR\n",
+			wantStdout: "acme/api\t#1\tpr\t-\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n" +
+				"acme/web\t#2\tpr\t-\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n" +
+				"acme/api\t-\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n" +
+				"acme/gone\t#4\tpr\t-\treview_requested\t2026-10-20T09:00:00Z\tLost PR\n",
 		},
 		{
 			name:       "filter on the notification",
 			args:       []string{"list", "--type", "ci", "--older-than", "7d"},
-			wantStdout: "acme/api\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n",
+			wantStdout: "acme/api\t-\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n",
 		},
 		{
 			name:       "filter on details reports unreadable subjects",
 			args:       []string{"list", "--state", "merged,closed"},
-			wantStdout: "acme/api\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
+			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
 			wantStderr: "\nSkipped 1 notification whose pull request or issue couldn't be read:\n  acme/gone: Lost PR\n",
 		},
 		{
 			name:       "filter on people with @me",
 			args:       []string{"list", "--review-requested", "@me"},
-			wantStdout: "acme/web\tpr\topen\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n",
+			wantStdout: "acme/web\t#2\tpr\topen\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n",
 			wantStderr: "\nSkipped 1 notification whose pull request or issue couldn't be read:\n  acme/gone: Lost PR\n",
 		},
 		{
 			name:       "limit",
 			args:       []string{"list", "--limit", "1"},
-			wantStdout: "acme/api\tpr\t-\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
+			wantStdout: "acme/api\t#1\tpr\t-\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
 		},
 		{
 			name:       "nothing matches",

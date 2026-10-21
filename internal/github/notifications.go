@@ -74,6 +74,7 @@ func (c *Client) Notifications(ctx context.Context) ([]inbox.Notification, error
 				continue
 			}
 			seen[n.ID] = true
+			ref, _ := parseSubjectRef(n.Subject.URL)
 			all = append(all, inbox.Notification{
 				ID:         n.ID,
 				Repo:       n.Repository.FullName,
@@ -83,6 +84,8 @@ func (c *Client) Notifications(ctx context.Context) ([]inbox.Notification, error
 				Unread:     n.Unread,
 				UpdatedAt:  n.UpdatedAt,
 				SubjectURL: n.Subject.URL,
+				Number:     ref.num,
+				URL:        subjectWebURL(n.Subject.URL),
 			})
 		}
 	}

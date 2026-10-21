@@ -32,11 +32,13 @@ func TestNotifications(t *testing.T) {
 	want := inbox.Notification{
 		ID: "1", Repo: "o/r", Type: inbox.TypePullRequest, Title: "Fix it", Reason: "review_requested",
 		Unread: true, UpdatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
-		SubjectURL: "https://api.github.com/repos/o/r/pulls/7",
+		SubjectURL: "https://api.github.com/repos/o/r/pulls/7", Number: 7,
+		URL: "https://github.com/o/r/pull/7",
 	}
 	if len(got) != 1 || got[0].ID != want.ID || got[0].Repo != want.Repo || got[0].Type != want.Type ||
 		got[0].Title != want.Title || got[0].Reason != want.Reason || got[0].Unread != want.Unread ||
-		!got[0].UpdatedAt.Equal(want.UpdatedAt) || got[0].SubjectURL != want.SubjectURL {
+		!got[0].UpdatedAt.Equal(want.UpdatedAt) || got[0].SubjectURL != want.SubjectURL ||
+		got[0].Number != want.Number || got[0].URL != want.URL {
 		t.Errorf("Notifications() = %+v, want [%+v]", got, want)
 	}
 }

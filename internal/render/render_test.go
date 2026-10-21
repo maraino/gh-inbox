@@ -16,8 +16,9 @@ var sample = []inbox.Notification{
 	{
 		ID: "1", Repo: "acme/api", Type: inbox.TypePullRequest, Title: "Fix it", Reason: "review_requested",
 		Unread: true, UpdatedAt: now.Add(-3 * time.Hour),
-		SubjectURL: "https://api.github.com/repos/acme/api/pulls/7",
-		Subject:    &inbox.Subject{Number: 7, State: inbox.StateMerged, URL: "https://github.com/acme/api/pull/7", Author: "alice"},
+		SubjectURL: "https://api.github.com/repos/acme/api/pulls/7", Number: 7,
+		URL:     "https://github.com/acme/api/pull/7",
+		Subject: &inbox.Subject{Number: 7, State: inbox.StateMerged, URL: "https://github.com/acme/api/pull/7", Author: "alice"},
 	},
 	{
 		ID: "2", Repo: "acme/api", Type: inbox.TypeCheckSuite, Title: "CI failed", Reason: "ci_activity",
@@ -25,8 +26,8 @@ var sample = []inbox.Notification{
 	},
 	{
 		ID: "3", Repo: "acme/web", Type: inbox.TypePullRequest, Title: "Add it", Reason: "review_requested",
-		UpdatedAt: now.Add(-5 * time.Minute),
-		Subject:   &inbox.Subject{Number: 9, State: inbox.StateOpen},
+		UpdatedAt: now.Add(-5 * time.Minute), Number: 9,
+		Subject: &inbox.Subject{Number: 9, State: inbox.StateOpen},
 	},
 }
 
@@ -35,9 +36,9 @@ func TestTable(t *testing.T) {
 	if err := Table(&buf, sample, false, 0, now); err != nil {
 		t.Fatal(err)
 	}
-	want := "acme/api\tpr\tmerged\treview_requested\t2026-10-20T09:00:00Z\tFix it\n" +
-		"acme/api\tci\t-\tci_activity\t2026-10-18T12:00:00Z\tCI failed\n" +
-		"acme/web\tpr\topen\treview_requested\t2026-10-20T11:55:00Z\tAdd it\n"
+	want := "acme/api\t#7\tpr\tmerged\treview_requested\t2026-10-20T09:00:00Z\tFix it\n" +
+		"acme/api\t-\tci\t-\tci_activity\t2026-10-18T12:00:00Z\tCI failed\n" +
+		"acme/web\t#9\tpr\topen\treview_requested\t2026-10-20T11:55:00Z\tAdd it\n"
 	if got := buf.String(); got != want {
 		t.Errorf("Table() =\n%s\nwant\n%s", got, want)
 	}
@@ -49,7 +50,7 @@ func TestTableTTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"REPO", "TITLE", "3h ago", "2d ago", "5m ago"} {
+	for _, want := range []string{"REPO", "NUMBER", "#7", "TITLE", "3h ago", "2d ago", "5m ago"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Table() on a terminal doesn't contain %q:\n%s", want, got)
 		}
@@ -110,6 +111,15 @@ func TestJSON(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("JSON() wrote %d notifications, want 2", len(got))
+	}
+	if got[0]["url"] != "https://github.com/acme/api/pull/7" || got[0]["number"] != 7.0 {
+		t.Errorf("first notification's url, number = %v, %v", got[0]["url"], got[0]["number"])
+	}
+	if _, ok := got[0]["subject_url"]; ok {
+		t.Error("a notification has the API URL")
+	}
+	if _, ok := got[1]["url"]; ok {
+		t.Error("a CI notification has a URL")
 	}
 	subject, ok := got[0]["subject"].(map[string]any)
 	if !ok || subject["state"] != "merged" || subject["author"] != "alice" {

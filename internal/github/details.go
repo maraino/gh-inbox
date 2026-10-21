@@ -98,6 +98,31 @@ func parseSubjectRef(apiURL string) (subjectRef, bool) {
 	return subjectRef{url: apiURL, owner: parts[0], repo: parts[1], num: num, isPR: parts[2] == "pulls"}, true
 }
 
+// subjectWebURL returns the web URL of the pull request or issue with the
+// given API URL, or "" when it isn't one. The API of github.com and GHE.com
+// is on an "api." subdomain; Enterprise Server's is under /api/v3 on the
+// same host.
+func subjectWebURL(apiURL string) string {
+	ref, ok := parseSubjectRef(apiURL)
+	if !ok {
+		return ""
+	}
+	u, err := url.Parse(apiURL)
+	if err != nil {
+		return ""
+	}
+	kind := "issues"
+	if ref.isPR {
+		kind = "pull"
+	}
+	web := url.URL{
+		Scheme: u.Scheme,
+		Host:   strings.TrimPrefix(u.Host, "api."),
+		Path:   fmt.Sprintf("/%s/%s/%s/%d", ref.owner, ref.repo, kind, ref.num),
+	}
+	return web.String()
+}
+
 // SubjectDetails looks up the pull requests and issues the notifications are
 // about. It returns their details keyed by subject URL. Subjects that no
 // longer exist or that can't be read are missing from the result; any other

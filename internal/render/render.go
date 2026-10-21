@@ -19,9 +19,10 @@ import (
 // aligned and fit in width; otherwise they are separated by tabs.
 func Table(w io.Writer, notifications []inbox.Notification, isTTY bool, width int, now time.Time) error {
 	tp := tableprinter.New(w, isTTY, width)
-	tp.AddHeader([]string{"REPO", "TYPE", "STATE", "REASON", "UPDATED", "TITLE"})
+	tp.AddHeader([]string{"REPO", "NUMBER", "TYPE", "STATE", "REASON", "UPDATED", "TITLE"})
 	for _, n := range notifications {
 		tp.AddField(n.Repo)
+		tp.AddField(number(n))
 		tp.AddField(n.Type.ShortName())
 		tp.AddField(state(n))
 		tp.AddField(n.Reason)
@@ -105,11 +106,12 @@ type jsonNotification struct {
 	ID         string       `json:"id"`
 	Repository string       `json:"repository"`
 	Type       string       `json:"type"`
+	Number     int          `json:"number,omitempty"`
 	Title      string       `json:"title"`
 	Reason     string       `json:"reason"`
 	Unread     bool         `json:"unread"`
 	UpdatedAt  time.Time    `json:"updated_at"`
-	SubjectURL string       `json:"subject_url,omitempty"`
+	URL        string       `json:"url,omitempty"`
 	Subject    *jsonSubject `json:"subject,omitempty"`
 }
 
@@ -131,11 +133,12 @@ func JSON(w io.Writer, notifications []inbox.Notification) error {
 			ID:         n.ID,
 			Repository: n.Repo,
 			Type:       n.Type.ShortName(),
+			Number:     n.Number,
 			Title:      n.Title,
 			Reason:     n.Reason,
 			Unread:     n.Unread,
 			UpdatedAt:  n.UpdatedAt,
-			SubjectURL: n.SubjectURL,
+			URL:        n.URL,
 		}
 		if s := n.Subject; s != nil {
 			out[i].Subject = &jsonSubject{
@@ -160,6 +163,15 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// number returns the number of the notification's pull request or issue,
+// such as "#7", or "-" for other types.
+func number(n inbox.Notification) string {
+	if n.Number == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("#%d", n.Number)
 }
 
 // state returns the state of the notification's subject, or "-" when it's

@@ -42,6 +42,22 @@ func TestParseSubjectRef(t *testing.T) {
 	}
 }
 
+func TestSubjectWebURL(t *testing.T) {
+	tests := map[string]string{
+		"https://api.github.com/repos/o/r/pulls/7":          "https://github.com/o/r/pull/7",
+		"https://api.github.com/repos/o/r/issues/8":         "https://github.com/o/r/issues/8",
+		"https://api.acme.ghe.com/repos/o/r/pulls/7":        "https://acme.ghe.com/o/r/pull/7",
+		"https://ghe.example.com/api/v3/repos/o/r/issues/8": "https://ghe.example.com/o/r/issues/8",
+		"https://api.github.com/repos/o/r/releases/1":       "",
+		"": "",
+	}
+	for apiURL, want := range tests {
+		if got := subjectWebURL(apiURL); got != want {
+			t.Errorf("subjectWebURL(%q) = %q, want %q", apiURL, got, want)
+		}
+	}
+}
+
 // graphQLRequest is the body of a GraphQL request.
 type graphQLRequest struct {
 	Query     string         `json:"query"`

@@ -106,6 +106,12 @@ type Notification struct {
 	// SubjectURL is the API URL of the subject. It's empty for some types,
 	// such as CI runs.
 	SubjectURL string
+	// Number is the number of the pull request or issue, or 0 for other
+	// types.
+	Number int
+	// URL is the web URL of the pull request or issue. It's empty for other
+	// types.
+	URL string
 	// Subject holds the details of a pull request or issue. It's nil until
 	// they are looked up, and when they couldn't be.
 	Subject *Subject
