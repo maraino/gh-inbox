@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/maraino/gh-inbox/internal/filter"
+	"github.com/maraino/gh-inbox/internal/github"
 	"github.com/maraino/gh-inbox/internal/render"
 )
 
@@ -62,13 +63,24 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 		return err
 	}
 
-	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), progress{e.errOut, e.showProgress})
+	p := progress{e.errOut, e.showProgress}
+	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), p)
 	if err != nil {
 		return err
 	}
 	matched := sel.matched
 	if opts.limit > 0 && len(matched) > opts.limit {
 		matched = matched[:opts.limit]
+	}
+
+	// The table and JSON show the state and people of pull requests and
+	// issues, so look them up when the filters didn't need them.
+	if !opts.summary && !sel.detailed {
+		err := lookUpDetails(ctx, c, matched, github.DetailsOptions{}, p)
+		p.clear()
+		if err != nil {
+			return err
+		}
 	}
 
 	switch {

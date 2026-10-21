@@ -133,8 +133,8 @@ func TestList(t *testing.T) {
 		{
 			name: "everything",
 			args: []string{"list"},
-			wantStdout: "acme/api\t#1\tpr\t-\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n" +
-				"acme/web\t#2\tpr\t-\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n" +
+			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n" +
+				"acme/web\t#2\tpr\topen\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n" +
 				"acme/api\t-\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n" +
 				"acme/gone\t#4\tpr\t-\treview_requested\t2026-10-20T09:00:00Z\tLost PR\n",
 		},
@@ -158,7 +158,7 @@ func TestList(t *testing.T) {
 		{
 			name:       "limit",
 			args:       []string{"list", "--limit", "1"},
-			wantStdout: "acme/api\t#1\tpr\t-\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
+			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
 		},
 		{
 			name:       "nothing matches",

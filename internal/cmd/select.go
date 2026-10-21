@@ -22,6 +22,9 @@ type selection struct {
 	// notifications, but whose details couldn't be read to apply the
 	// others.
 	unreadable []inbox.Notification
+	// detailed reports whether the details of pull requests and issues were
+	// looked up.
+	detailed bool
 }
 
 // selectNotifications lists the inbox and applies the filters. Threads the
@@ -58,18 +61,13 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 	}
 
 	if filters.NeedsDetails() {
-		p.show("Looking up pull requests and issues…")
-		details, err := c.SubjectDetails(ctx, candidates, github.DetailsOptions{ReviewTeams: filters.NeedsReviewTeams()})
-		if err != nil {
+		if err := lookUpDetails(ctx, c, candidates, github.DetailsOptions{ReviewTeams: filters.NeedsReviewTeams()}, p); err != nil {
 			return nil, err
-		}
-		for i := range candidates {
-			candidates[i].Subject = details[candidates[i].SubjectURL]
 		}
 	}
 	p.clear()
 
-	sel := &selection{listed: listed}
+	sel := &selection{listed: listed, detailed: filters.NeedsDetails()}
 	for _, n := range candidates {
 		switch {
 		case filters.Match(n):
@@ -79,6 +77,20 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 		}
 	}
 	return sel, nil
+}
+
+// lookUpDetails sets the details of the pull requests and issues in
+// notifications. Those that couldn't be read keep a nil Subject.
+func lookUpDetails(ctx context.Context, c client, notifications []inbox.Notification, opts github.DetailsOptions, p progress) error {
+	p.show("Looking up pull requests and issues…")
+	details, err := c.SubjectDetails(ctx, notifications, opts)
+	if err != nil {
+		return err
+	}
+	for i := range notifications {
+		notifications[i].Subject = details[notifications[i].SubjectURL]
+	}
+	return nil
 }
 
 // reportUnreadable tells which notifications were left out because their
