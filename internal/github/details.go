@@ -25,7 +25,8 @@ const (
 )
 
 // prFragment and issueFragment select the fields of inbox.Subject. A query
-// must only include the fragments it uses.
+// must only include the fragments it uses. %s in prFragment is where
+// teamFields go.
 const (
 	prFragment = `
 fragment pr on PullRequest {
@@ -38,8 +39,7 @@ fragment pr on PullRequest {
         __typename
         ... on User { login }
         ... on Bot { login }
-        ... on Mannequin { login }
-        ... on Team { slug organization { login } }
+        ... on Mannequin { login }%s
       }
     }
   }
@@ -50,7 +50,21 @@ fragment issue on Issue {
   author { login }
   assignees(first: 100) { nodes { login } }
 }`
+	// teamFields select the teams whose review is requested. Reading them
+	// needs the read:org scope.
+	teamFields = `
+        ... on Team { slug organization { login } }`
 )
+
+// DetailsOptions choose what SubjectDetails looks up.
+type DetailsOptions struct {
+	// ReviewTeams looks up the teams whose review is requested, which needs
+	// the read:org scope. Without it, inbox.Subject.ReviewTeams is empty.
+	ReviewTeams bool
+}
+
+// errMissingReadOrg explains how to grant the scope team lookups need.
+var errMissingReadOrg = errors.New(`reading teams needs the read:org scope: run "gh auth refresh -s read:org"`)
 
 // subjectRef identifies a pull request or issue.
 type subjectRef struct {
@@ -88,7 +102,7 @@ func parseSubjectRef(apiURL string) (subjectRef, bool) {
 // about. It returns their details keyed by subject URL. Subjects that no
 // longer exist or that can't be read are missing from the result; any other
 // failure is an error.
-func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notification) (map[string]*inbox.Subject, error) {
+func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notification, opts DetailsOptions) (map[string]*inbox.Subject, error) {
 	var refs []subjectRef
 	seen := make(map[string]bool)
 	for _, n := range notifications {
@@ -107,7 +121,7 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 	g.SetLimit(detailsConcurrency)
 	for batch := range slices.Chunk(refs, detailsBatchSize) {
 		g.Go(func() error {
-			found, err := c.lookUpBatch(ctx, batch)
+			found, err := c.lookUpBatch(ctx, batch, opts)
 			if err != nil {
 				return err
 			}
@@ -154,7 +168,7 @@ type apiSubject struct {
 
 // lookUpBatch looks up the refs with a single query, with one aliased
 // repository field per ref.
-func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef) (map[string]*inbox.Subject, error) {
+func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef, opts DetailsOptions) (map[string]*inbox.Subject, error) {
 	var params, fields strings.Builder
 	var hasPRs, hasIssues bool
 	vars := make(map[string]any, 3*len(refs))
@@ -174,7 +188,11 @@ func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef) (map[string
 	}
 	query := fmt.Sprintf("query(%s) {\n%s}\n", strings.TrimSuffix(params.String(), ", "), fields.String())
 	if hasPRs {
-		query += prFragment
+		teams := ""
+		if opts.ReviewTeams {
+			teams = teamFields
+		}
+		query += fmt.Sprintf(prFragment, teams)
 	}
 	if hasIssues {
 		query += issueFragment
@@ -190,7 +208,11 @@ func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef) (map[string
 	})
 	// Subjects that can't be read come back as null with an error each, next
 	// to the data for the others.
-	if err != nil && !onlyUnreadable(err) {
+	switch {
+	case err == nil || onlyUnreadable(err):
+	case hasErrorType(err, "INSUFFICIENT_SCOPES"):
+		return nil, errMissingReadOrg
+	default:
 		return nil, err
 	}
 
@@ -209,6 +231,14 @@ func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef) (map[string
 		}
 	}
 	return found, nil
+}
+
+// hasErrorType reports whether err is a GraphQL error with an error of the
+// given type.
+func hasErrorType(err error, typ string) bool {
+	var gqlErr *api.GraphQLError
+	return errors.As(err, &gqlErr) &&
+		slices.ContainsFunc(gqlErr.Errors, func(item api.GraphQLErrorItem) bool { return item.Type == typ })
 }
 
 // onlyUnreadable reports whether err is a GraphQL error made only of

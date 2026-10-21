@@ -72,6 +72,9 @@ type Set struct {
 	basic []func(inbox.Notification) bool
 	// detailed filters need the details of the pull request or issue.
 	detailed []func(*inbox.Subject) bool
+	// reviewTeams reports whether a detailed filter needs the teams whose
+	// review is requested.
+	reviewTeams bool
 }
 
 // New compiles the filters in o.
@@ -101,6 +104,13 @@ func New(o *Options, env Env) (*Set, error) {
 // and issues.
 func (s *Set) NeedsDetails() bool {
 	return len(s.detailed) > 0
+}
+
+// NeedsReviewTeams reports whether a filter needs the teams whose review is
+// requested, which are only looked up when needed: reading them needs the
+// read:org scope.
+func (s *Set) NeedsReviewTeams() bool {
+	return s.reviewTeams
 }
 
 // MatchBasic reports whether n matches the filters that don't need details.
@@ -284,6 +294,7 @@ func (b *builder) people(flag string, values []string, r relation) {
 			b.errorf("--%s: %w", flag, err)
 		}
 		people = append(people, p)
+		b.set.reviewTeams = b.set.reviewTeams || (r.teams && len(p.teams) > 0)
 	}
 	b.set.detailed = append(b.set.detailed, func(s *inbox.Subject) bool {
 		matched := slices.ContainsFunc(people, func(p person) bool { return r.match(p, s) })

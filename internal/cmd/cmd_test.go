@@ -34,7 +34,7 @@ func (c *fakeClient) Notifications(context.Context) ([]inbox.Notification, error
 	return slices.Clone(c.notifications), nil
 }
 
-func (c *fakeClient) SubjectDetails(_ context.Context, ns []inbox.Notification) (map[string]*inbox.Subject, error) {
+func (c *fakeClient) SubjectDetails(_ context.Context, ns []inbox.Notification, _ github.DetailsOptions) (map[string]*inbox.Subject, error) {
 	found := make(map[string]*inbox.Subject)
 	for _, n := range ns {
 		if s, ok := c.details[n.SubjectURL]; ok {

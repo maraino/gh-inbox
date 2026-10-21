@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -151,5 +152,18 @@ func TestViewer(t *testing.T) {
 	}
 	if got.Login != "me" || !slices.Equal(got.Teams, []string{"acme/backend", "acme/security"}) {
 		t.Errorf("Viewer() = %+v", got)
+	}
+}
+
+func TestViewerWithoutReadOrg(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			w.Write([]byte(`{"login": "me"}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	if _, err := c.Viewer(t.Context()); !errors.Is(err, errMissingReadOrg) {
+		t.Errorf("Viewer() error = %v, want %v", err, errMissingReadOrg)
 	}
 }

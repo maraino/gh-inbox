@@ -8,6 +8,7 @@ import (
 
 	"github.com/maraino/gh-inbox/internal/cache"
 	"github.com/maraino/gh-inbox/internal/filter"
+	"github.com/maraino/gh-inbox/internal/github"
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
 
@@ -58,7 +59,7 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 
 	if filters.NeedsDetails() {
 		p.show("Looking up pull requests and issues…")
-		details, err := c.SubjectDetails(ctx, candidates)
+		details, err := c.SubjectDetails(ctx, candidates, github.DetailsOptions{ReviewTeams: filters.NeedsReviewTeams()})
 		if err != nil {
 			return nil, err
 		}

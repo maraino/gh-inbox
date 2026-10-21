@@ -27,7 +27,7 @@ func Execute(ctx context.Context) error {
 // client is the part of the GitHub client the commands use.
 type client interface {
 	Notifications(ctx context.Context) ([]inbox.Notification, error)
-	SubjectDetails(ctx context.Context, notifications []inbox.Notification) (map[string]*inbox.Subject, error)
+	SubjectDetails(ctx context.Context, notifications []inbox.Notification, opts github.DetailsOptions) (map[string]*inbox.Subject, error)
 	Viewer(ctx context.Context) (inbox.Identity, error)
 	action.Client
 }

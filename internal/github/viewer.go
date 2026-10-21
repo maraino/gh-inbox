@@ -2,7 +2,11 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+
+	"github.com/cli/go-gh/v2/pkg/api"
 
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
@@ -26,6 +30,10 @@ func (c *Client) Viewer(ctx context.Context) (inbox.Identity, error) {
 			} `json:"organization"`
 		}
 		links, err := c.get(ctx, path, &page)
+		var httpErr *api.HTTPError
+		if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusForbidden || httpErr.StatusCode == http.StatusNotFound) {
+			return inbox.Identity{}, fmt.Errorf("listing your teams: %w", errMissingReadOrg)
+		}
 		if err != nil {
 			return inbox.Identity{}, fmt.Errorf("listing your teams: %w", err)
 		}

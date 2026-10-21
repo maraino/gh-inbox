@@ -189,6 +189,28 @@ func TestNeedsDetails(t *testing.T) {
 	}
 }
 
+func TestNeedsReviewTeams(t *testing.T) {
+	tests := []struct {
+		opts Options
+		want bool
+	}{
+		{opts: Options{States: []string{"open"}}, want: false},
+		{opts: Options{ReviewRequested: []string{"bob"}}, want: false},
+		{opts: Options{AssignedTo: []string{"@me"}}, want: false},
+		{opts: Options{ReviewRequested: []string{"@me"}}, want: true},
+		{opts: Options{NotInvolves: []string{"acme/backend"}}, want: true},
+	}
+	for _, tt := range tests {
+		set, err := New(&tt.opts, Env{Now: now, Me: me})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := set.NeedsReviewTeams(); got != tt.want {
+			t.Errorf("NeedsReviewTeams() with %+v = %v, want %v", tt.opts, got, tt.want)
+		}
+	}
+}
+
 func TestMatchBasic(t *testing.T) {
 	set, err := New(&Options{Repos: []string{"acme/api"}, States: []string{"open"}}, Env{Now: now})
 	if err != nil {

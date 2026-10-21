@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -67,6 +68,9 @@ func TestSubjectDetails(t *testing.T) {
 		if !strings.Contains(req.Query, "fragment pr ") || !strings.Contains(req.Query, "fragment issue ") {
 			t.Errorf("query lacks a fragment it uses:\n%s", req.Query)
 		}
+		if !strings.Contains(req.Query, "... on Team") {
+			t.Errorf("query doesn't look up review teams:\n%s", req.Query)
+		}
 		w.Write([]byte(`{
 			"data": {
 				"s0": {"pullRequest": {
@@ -89,7 +93,7 @@ func TestSubjectDetails(t *testing.T) {
 		}`))
 	}))
 
-	got, err := c.SubjectDetails(t.Context(), notifications)
+	got, err := c.SubjectDetails(t.Context(), notifications, DetailsOptions{ReviewTeams: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +130,9 @@ func TestSubjectDetailsBatches(t *testing.T) {
 			return
 		}
 		// GitHub rejects queries with unused fragments.
+		if strings.Contains(req.Query, "... on Team") {
+			t.Errorf("query looks up review teams without being asked to:\n%s", req.Query)
+		}
 		if strings.Contains(req.Query, "fragment pr ") {
 			t.Errorf("query of issues only defines the pull request fragment:\n%s", req.Query)
 		}
@@ -138,7 +145,7 @@ func TestSubjectDetailsBatches(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 
-	got, err := c.SubjectDetails(t.Context(), notifications)
+	got, err := c.SubjectDetails(t.Context(), notifications, DetailsOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,8 +159,9 @@ func TestSubjectDetailsBatches(t *testing.T) {
 
 func TestSubjectDetailsFailures(t *testing.T) {
 	tests := []struct {
-		name string
-		body string
+		name    string
+		body    string
+		wantErr error
 	}{
 		{
 			name: "unexpected GraphQL error",
@@ -162,6 +170,11 @@ func TestSubjectDetailsFailures(t *testing.T) {
 		{
 			name: "rate limited",
 			body: `{"errors": [{"type": "RATE_LIMITED", "message": "API rate limit exceeded"}]}`,
+		},
+		{
+			name:    "missing read:org",
+			body:    `{"data": {"s0": null}, "errors": [{"type": "INSUFFICIENT_SCOPES", "message": "The 'slug' field requires read:org"}]}`,
+			wantErr: errMissingReadOrg,
 		},
 	}
 	for _, tt := range tests {
@@ -172,8 +185,12 @@ func TestSubjectDetailsFailures(t *testing.T) {
 			notifications := []inbox.Notification{
 				{Type: inbox.TypePullRequest, SubjectURL: "https://api.github.com/repos/o/r/pulls/7"},
 			}
-			if _, err := c.SubjectDetails(t.Context(), notifications); err == nil {
-				t.Error("SubjectDetails() succeeded, want an error")
+			_, err := c.SubjectDetails(t.Context(), notifications, DetailsOptions{ReviewTeams: true})
+			if err == nil {
+				t.Fatal("SubjectDetails() succeeded, want an error")
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Errorf("SubjectDetails() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
