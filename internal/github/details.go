@@ -63,8 +63,8 @@ type DetailsOptions struct {
 	ReviewTeams bool
 }
 
-// errMissingReadOrg explains how to grant the scope team lookups need.
-var errMissingReadOrg = errors.New(`reading teams needs the read:org scope: run "gh auth refresh -s read:org"`)
+// ErrMissingReadOrg explains how to grant the scope team lookups need.
+var ErrMissingReadOrg = errors.New(`reading teams needs the read:org scope: run "gh auth refresh -s read:org"`)
 
 // subjectRef identifies a pull request or issue.
 type subjectRef struct {
@@ -236,7 +236,7 @@ func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef, opts Detail
 	switch {
 	case err == nil || onlyUnreadable(err):
 	case hasErrorType(err, "INSUFFICIENT_SCOPES"):
-		return nil, errMissingReadOrg
+		return nil, ErrMissingReadOrg
 	default:
 		return nil, err
 	}
@@ -298,6 +298,10 @@ func (s *apiSubject) toSubject() *inbox.Subject {
 		case reviewer == nil:
 			// The reviewer is no longer visible, such as a deleted team.
 		case reviewer.Typename == "Team":
+			if reviewer.Slug == "" {
+				// The query didn't ask for teams.
+				continue
+			}
 			subject.ReviewTeams = append(subject.ReviewTeams, reviewer.Organization.Login+"/"+reviewer.Slug)
 		default:
 			subject.ReviewUsers = append(subject.ReviewUsers, reviewer.Login)

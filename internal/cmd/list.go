@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/maraino/gh-inbox/internal/filter"
-	"github.com/maraino/gh-inbox/internal/github"
 	"github.com/maraino/gh-inbox/internal/render"
 )
 
@@ -64,7 +63,8 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 	}
 
 	p := progress{e.errOut, e.showProgress}
-	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), p)
+	// Only the JSON shows the teams whose review is requested.
+	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), opts.json, p)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 	// The table and JSON show the state and people of pull requests and
 	// issues, so look them up when the filters didn't need them.
 	if !opts.summary && !sel.detailed {
-		err := lookUpDetails(ctx, c, matched, github.DetailsOptions{}, p)
+		err := lookUpDetails(ctx, c, matched, false, opts.json, p)
 		p.clear()
 		if err != nil {
 			return err

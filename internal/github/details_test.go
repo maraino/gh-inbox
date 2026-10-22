@@ -128,6 +128,24 @@ func TestSubjectDetails(t *testing.T) {
 	}
 }
 
+func TestToSubjectWithoutTeams(t *testing.T) {
+	// Without the team fields, a team reviewer only has its type.
+	var s apiSubject
+	if err := json.Unmarshal([]byte(`{
+		"number": 7, "state": "OPEN",
+		"reviewRequests": {"nodes": [
+			{"requestedReviewer": {"__typename": "User", "login": "carol"}},
+			{"requestedReviewer": {"__typename": "Team"}}
+		]}
+	}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	got := s.toSubject()
+	if !reflect.DeepEqual(got.ReviewUsers, []string{"carol"}) || got.ReviewTeams != nil {
+		t.Errorf("toSubject() review users, teams = %q, %q, want [carol], none", got.ReviewUsers, got.ReviewTeams)
+	}
+}
+
 func TestSubjectDetailsBatches(t *testing.T) {
 	const total = 2*detailsBatchSize + 3
 	var notifications []inbox.Notification
@@ -190,7 +208,7 @@ func TestSubjectDetailsFailures(t *testing.T) {
 		{
 			name:    "missing read:org",
 			body:    `{"data": {"s0": null}, "errors": [{"type": "INSUFFICIENT_SCOPES", "message": "The 'slug' field requires read:org"}]}`,
-			wantErr: errMissingReadOrg,
+			wantErr: ErrMissingReadOrg,
 		},
 	}
 	for _, tt := range tests {

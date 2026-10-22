@@ -32,7 +32,7 @@ func (c *Client) Viewer(ctx context.Context) (inbox.Identity, error) {
 		links, err := c.get(ctx, path, &page)
 		var httpErr *api.HTTPError
 		if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusForbidden || httpErr.StatusCode == http.StatusNotFound) {
-			return inbox.Identity{}, fmt.Errorf("listing your teams: %w", errMissingReadOrg)
+			return inbox.Identity{}, fmt.Errorf("listing your teams: %w", ErrMissingReadOrg)
 		}
 		if err != nil {
 			return inbox.Identity{}, fmt.Errorf("listing your teams: %w", err)

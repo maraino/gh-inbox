@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -28,8 +29,10 @@ type selection struct {
 }
 
 // selectNotifications lists the inbox and applies the filters. Threads the
-// record says are done are left out; done can be nil to keep them.
-func selectNotifications(ctx context.Context, c client, opts *filter.Options, done *cache.Store, now time.Time, p progress) (*selection, error) {
+// record says are done are left out; done can be nil to keep them. With
+// wantTeams, looking up pull requests also looks up the teams whose review
+// is requested, when the token can read them.
+func selectNotifications(ctx context.Context, c client, opts *filter.Options, done *cache.Store, now time.Time, wantTeams bool, p progress) (*selection, error) {
 	env := filter.Env{Now: now}
 	if opts.NeedsIdentity() {
 		p.show("Looking up your user and teams…")
@@ -61,7 +64,7 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 	}
 
 	if filters.NeedsDetails() {
-		if err := lookUpDetails(ctx, c, candidates, github.DetailsOptions{ReviewTeams: filters.NeedsReviewTeams()}, p); err != nil {
+		if err := lookUpDetails(ctx, c, candidates, filters.NeedsReviewTeams(), wantTeams, p); err != nil {
 			return nil, err
 		}
 	}
@@ -80,10 +83,15 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 }
 
 // lookUpDetails sets the details of the pull requests and issues in
-// notifications. Those that couldn't be read keep a nil Subject.
-func lookUpDetails(ctx context.Context, c client, notifications []inbox.Notification, opts github.DetailsOptions, p progress) error {
+// notifications. Those that couldn't be read keep a nil Subject. The teams
+// whose review is requested are looked up when needTeams, or when wantTeams
+// and the token can read them.
+func lookUpDetails(ctx context.Context, c client, notifications []inbox.Notification, needTeams, wantTeams bool, p progress) error {
 	p.show("Looking up pull requests and issues…")
-	details, err := c.SubjectDetails(ctx, notifications, opts)
+	details, err := c.SubjectDetails(ctx, notifications, github.DetailsOptions{ReviewTeams: needTeams || wantTeams})
+	if err != nil && !needTeams && errors.Is(err, github.ErrMissingReadOrg) {
+		details, err = c.SubjectDetails(ctx, notifications, github.DetailsOptions{})
+	}
 	if err != nil {
 		return err
 	}
