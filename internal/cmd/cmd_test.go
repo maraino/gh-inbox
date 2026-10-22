@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,9 @@ type fakeClient struct {
 	me      inbox.Identity
 	// fail are the thread IDs that actions fail for.
 	fail map[string]bool
+	// noReadOrg makes looking up review teams fail as without the read:org
+	// scope.
+	noReadOrg bool
 
 	mu      sync.Mutex
 	actions []string
@@ -35,11 +39,18 @@ func (c *fakeClient) Notifications(context.Context) ([]inbox.Notification, error
 	return slices.Clone(c.notifications), nil
 }
 
-func (c *fakeClient) SubjectDetails(_ context.Context, ns []inbox.Notification, _ github.DetailsOptions) (map[string]*inbox.Subject, error) {
+func (c *fakeClient) SubjectDetails(_ context.Context, ns []inbox.Notification, opts github.DetailsOptions) (map[string]*inbox.Subject, error) {
+	if opts.ReviewTeams && c.noReadOrg {
+		return nil, github.ErrMissingReadOrg
+	}
 	found := make(map[string]*inbox.Subject)
 	for _, n := range ns {
 		if s, ok := c.details[n.SubjectURL]; ok {
-			found[n.SubjectURL] = s
+			s := *s
+			if !opts.ReviewTeams {
+				s.ReviewTeams = nil
+			}
+			found[n.SubjectURL] = &s
 		}
 	}
 	return found, nil
@@ -197,6 +208,36 @@ func TestListFormats(t *testing.T) {
 	}
 	if want := `"title": "CI failed"`; !bytes.Contains([]byte(got.stdout), []byte(want)) {
 		t.Errorf("--json output doesn't contain %q:\n%s", want, got.stdout)
+	}
+
+	// The JSON has the teams whose review is requested when the token can
+	// read them, with or without a filter on details.
+	teams := `"review_requested_teams": [
+        "acme/backend"
+      ]`
+	for _, args := range [][]string{
+		{"list", "--json", "--repo", "acme/web"},
+		{"list", "--json", "--state", "open"},
+	} {
+		got = run(t, newFakeInbox(), t.TempDir(), args...)
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if !strings.Contains(got.stdout, teams) {
+			t.Errorf("%v output doesn't contain %q:\n%s", args, teams, got.stdout)
+		}
+	}
+	noReadOrg := newFakeInbox()
+	noReadOrg.noReadOrg = true
+	got = run(t, noReadOrg, t.TempDir(), "list", "--json", "--repo", "acme/web")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if want := `"state": "open"`; !strings.Contains(got.stdout, want) || strings.Contains(got.stdout, "acme/backend") {
+		t.Errorf("--json without read:org doesn't contain %q, or has teams:\n%s", want, got.stdout)
+	}
+	if got := run(t, noReadOrg, t.TempDir(), "list", "--review-requested", "@me"); !errors.Is(got.err, github.ErrMissingReadOrg) {
+		t.Errorf("--review-requested @me without read:org error = %v, want %v", got.err, github.ErrMissingReadOrg)
 	}
 
 	if got := run(t, newFakeInbox(), t.TempDir(), "list", "--json", "--summary"); got.err == nil {

@@ -89,7 +89,7 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 		return err
 	}
 	p := progress{e.errOut, e.showProgress}
-	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), p)
+	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), false, p)
 	if err != nil {
 		return err
 	}

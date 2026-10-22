@@ -165,7 +165,7 @@ func TestViewerWithoutReadOrg(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusForbidden)
 	}))
-	if _, err := c.Viewer(t.Context()); !errors.Is(err, errMissingReadOrg) {
-		t.Errorf("Viewer() error = %v, want %v", err, errMissingReadOrg)
+	if _, err := c.Viewer(t.Context()); !errors.Is(err, ErrMissingReadOrg) {
+		t.Errorf("Viewer() error = %v, want %v", err, ErrMissingReadOrg)
 	}
 }
