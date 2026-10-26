@@ -7,11 +7,14 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/auth"
+	"github.com/cli/go-gh/v2/pkg/browser"
 	"github.com/cli/go-gh/v2/pkg/term"
 	"github.com/spf13/cobra"
+	xterm "golang.org/x/term"
 
 	"github.com/maraino/gh-inbox/internal/action"
 	"github.com/maraino/gh-inbox/internal/cache"
@@ -46,6 +49,11 @@ type env struct {
 	now          func() time.Time
 	newClient    func(github.Options) (client, error)
 	cachePath    func(host string) (string, error)
+	// readKey reads a key press from the terminal. It's nil when stdin or
+	// stdout isn't a terminal.
+	readKey func() (byte, error)
+	// openBrowser opens a URL in the web browser.
+	openBrowser func(url string) error
 }
 
 func defaultEnv() *env {
@@ -53,6 +61,10 @@ func defaultEnv() *env {
 	width, _, err := t.Size()
 	if err != nil {
 		width = 80
+	}
+	var readKey func() (byte, error)
+	if term.IsTerminal(os.Stdin) && t.IsTerminalOutput() {
+		readKey = readTerminalKey
 	}
 	return &env{
 		out:          t.Out(),
@@ -63,7 +75,27 @@ func defaultEnv() *env {
 		now:          time.Now,
 		newClient:    func(opts github.Options) (client, error) { return github.New(opts) },
 		cachePath:    cache.DefaultPath,
+		readKey:      readKey,
+		// Finding the browser reads the gh configuration, so only do it
+		// when one is opened.
+		openBrowser: func(url string) error { return browser.New("", t.Out(), t.ErrOut()).Browse(url) },
 	}
+}
+
+// readTerminalKey reads a key press from stdin, a terminal, without waiting
+// for Enter.
+func readTerminalKey() (byte, error) {
+	fd := int(os.Stdin.Fd())
+	state, err := xterm.MakeRaw(fd)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = xterm.Restore(fd, state) }() // Nothing to do if it fails.
+	var b [1]byte
+	if _, err := os.Stdin.Read(b[:]); err != nil {
+		return 0, err
+	}
+	return b[0], nil
 }
 
 // rootOptions are the flags shared by every command.
@@ -82,7 +114,7 @@ func newRootCmd(e *env) *cobra.Command {
 
 Use "gh inbox list" to see which notifications match a set of filters, and
 "gh inbox clean" to mark them as done, mark them as read, or unsubscribe from
-them.`,
+them. "gh inbox triage" goes through them one at a time.`,
 		Annotations: map[string]string{
 			cobra.CommandDisplayNameAnnotation: "gh inbox",
 		},
@@ -98,7 +130,7 @@ them.`,
 	flags.BoolVar(&opts.noCache, "no-cache", false, "Ignore the local record of notifications already marked as done")
 	flags.BoolVar(&opts.verbose, "verbose", false, "Log API requests and retries to stderr")
 
-	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e))
+	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e), newTriageCmd(opts, e))
 	return cmd
 }
 
@@ -126,6 +158,31 @@ func (o *rootOptions) client(e *env) (client, error) {
 		opts.Log = e.errOut
 	}
 	return e.newClient(opts)
+}
+
+// repoPages are the repository pages that list subjects of each type
+// without a web URL of their own.
+var repoPages = map[inbox.SubjectType]string{
+	inbox.TypeCheckSuite: "/actions",
+	inbox.TypeRelease:    "/releases",
+	inbox.TypeDiscussion: "/discussions",
+	inbox.TypeAdvisory:   "/security/advisories",
+	inbox.TypeDependabot: "/security/dependabot",
+}
+
+// webURL returns the web page of a notification: its pull request, issue or
+// commit, or the repository page that lists subjects of its type.
+func (o *rootOptions) webURL(n inbox.Notification) string {
+	if n.URL != "" {
+		return n.URL
+	}
+	repo := "https://" + o.host() + "/" + n.Repo
+	if n.Type == inbox.TypeCommit {
+		if _, sha, ok := strings.Cut(n.SubjectURL, "/commits/"); ok && sha != "" && !strings.Contains(sha, "/") {
+			return repo + "/commit/" + sha
+		}
+	}
+	return repo + repoPages[n.Type]
 }
 
 // openCache opens the record of threads marked as done. It returns nil with

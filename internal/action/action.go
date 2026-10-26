@@ -62,7 +62,6 @@ type Runner struct {
 // those it failed for, both in their original order. Once ctx is done, the
 // remaining notifications fail with the context's error.
 func (r *Runner) Run(ctx context.Context, notifications []inbox.Notification) (succeeded []inbox.Notification, failed []Failure) {
-	apply := r.apply()
 	errs := make([]error, len(notifications))
 
 	var (
@@ -74,7 +73,7 @@ func (r *Runner) Run(ctx context.Context, notifications []inbox.Notification) (s
 	for i, n := range notifications {
 		g.Go(func() error {
 			if errs[i] = ctx.Err(); errs[i] == nil {
-				errs[i] = apply(ctx, n.ID)
+				errs[i] = Apply(ctx, r.Client, r.Kind, n.ID)
 			}
 			if r.Progress != nil {
 				mu.Lock()
@@ -97,17 +96,16 @@ func (r *Runner) Run(ctx context.Context, notifications []inbox.Notification) (s
 	return succeeded, failed
 }
 
-func (r *Runner) apply() func(context.Context, string) error {
-	switch r.Kind {
+// Apply applies the action of the given kind to one thread.
+func Apply(ctx context.Context, c Client, kind Kind, threadID string) error {
+	switch kind {
 	case Done:
-		return r.Client.MarkDone
+		return c.MarkDone(ctx, threadID)
 	case Read:
-		return r.Client.MarkRead
+		return c.MarkRead(ctx, threadID)
 	case Unsubscribe:
-		return r.Client.Unsubscribe
+		return c.Unsubscribe(ctx, threadID)
 	default:
-		return func(context.Context, string) error {
-			return fmt.Errorf("unknown action %q", r.Kind)
-		}
+		return fmt.Errorf("unknown action %q", kind)
 	}
 }
