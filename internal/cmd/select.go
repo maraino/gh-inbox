@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/maraino/gh-inbox/internal/cache"
@@ -33,8 +34,19 @@ type selection struct {
 // wantTeams, looking up pull requests also looks up the teams whose review
 // is requested, when the token can read them.
 func selectNotifications(ctx context.Context, c client, opts *filter.Options, done *cache.Store, now time.Time, wantTeams bool, p progress) (*selection, error) {
+	sels, err := selectEach(ctx, c, []*filter.Options{opts}, done, now, wantTeams, p)
+	if err != nil {
+		return nil, err
+	}
+	return sels[0], nil
+}
+
+// selectEach is selectNotifications for several sets of filters, in order:
+// the inbox is listed once, and a notification is only selected by the first
+// set it matches.
+func selectEach(ctx context.Context, c client, opts []*filter.Options, done *cache.Store, now time.Time, wantTeams bool, p progress) ([]*selection, error) {
 	env := filter.Env{Now: now}
-	if opts.NeedsIdentity() {
+	if slices.ContainsFunc(opts, (*filter.Options).NeedsIdentity) {
 		p.show("Looking up your user and teams…")
 		me, err := c.Viewer(ctx)
 		if err != nil {
@@ -42,9 +54,16 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 		}
 		env.Me = me
 	}
-	filters, err := filter.New(opts, env)
-	if err != nil {
-		return nil, err
+	sets := make([]*filter.Set, len(opts))
+	var needDetails, needTeams bool
+	for i, o := range opts {
+		s, err := filter.New(o, env)
+		if err != nil {
+			return nil, err
+		}
+		sets[i] = s
+		needDetails = needDetails || s.NeedsDetails()
+		needTeams = needTeams || s.NeedsReviewTeams()
 	}
 
 	p.show("Listing notifications…")
@@ -58,28 +77,35 @@ func selectNotifications(ctx context.Context, c client, opts *filter.Options, do
 		if done != nil && done.IsDone(n.ID, n.UpdatedAt) {
 			continue
 		}
-		if filters.MatchBasic(n) {
+		if slices.ContainsFunc(sets, func(s *filter.Set) bool { return s.MatchBasic(n) }) {
 			candidates = append(candidates, n)
 		}
 	}
 
-	if filters.NeedsDetails() {
-		if err := lookUpDetails(ctx, c, candidates, filters.NeedsReviewTeams(), wantTeams, p); err != nil {
+	if needDetails {
+		if err := lookUpDetails(ctx, c, candidates, needTeams, wantTeams, p); err != nil {
 			return nil, err
 		}
 	}
 	p.clear()
 
-	sel := &selection{listed: listed, detailed: filters.NeedsDetails()}
-	for _, n := range candidates {
-		switch {
-		case filters.Match(n):
-			sel.matched = append(sel.matched, n)
-		case filters.NeedsDetails() && n.Type.HasDetails() && n.Subject == nil:
-			sel.unreadable = append(sel.unreadable, n)
+	sels := make([]*selection, len(sets))
+	selected := make(map[string]bool)
+	for i, s := range sets {
+		sel := &selection{listed: listed, detailed: needDetails}
+		for _, n := range candidates {
+			switch {
+			case selected[n.ID]:
+			case s.Match(n):
+				sel.matched = append(sel.matched, n)
+				selected[n.ID] = true
+			case s.NeedsDetails() && n.Type.HasDetails() && n.Subject == nil:
+				sel.unreadable = append(sel.unreadable, n)
+			}
 		}
+		sels[i] = sel
 	}
-	return sel, nil
+	return sels, nil
 }
 
 // lookUpDetails sets the details of the pull requests and issues in
@@ -99,6 +125,49 @@ func lookUpDetails(ctx context.Context, c client, notifications []inbox.Notifica
 		notifications[i].Subject = details[notifications[i].SubjectURL]
 	}
 	return nil
+}
+
+// merge returns the notifications that any of the selections matched, in
+// the order of the inbox.
+func merge(sels []*selection) *selection {
+	if len(sels) == 1 {
+		return sels[0]
+	}
+	// The matched notifications have details that the listed ones don't.
+	matched := make(map[string]inbox.Notification)
+	for _, sel := range sels {
+		for _, n := range sel.matched {
+			matched[n.ID] = n
+		}
+	}
+	merged := &selection{listed: sels[0].listed, detailed: sels[0].detailed, unreadable: unreadableOf(sels)}
+	for _, n := range sels[0].listed {
+		if m, ok := matched[n.ID]; ok {
+			merged.matched = append(merged.matched, m)
+		}
+	}
+	return merged
+}
+
+// unreadableOf returns the unreadable notifications of the selections, each
+// once, leaving out those another selection matched.
+func unreadableOf(sels []*selection) []inbox.Notification {
+	seen := make(map[string]bool)
+	for _, sel := range sels {
+		for _, n := range sel.matched {
+			seen[n.ID] = true
+		}
+	}
+	var unreadable []inbox.Notification
+	for _, sel := range sels {
+		for _, n := range sel.unreadable {
+			if !seen[n.ID] {
+				seen[n.ID] = true
+				unreadable = append(unreadable, n)
+			}
+		}
+	}
+	return unreadable
 }
 
 // reportUnreadable tells which notifications were left out because their

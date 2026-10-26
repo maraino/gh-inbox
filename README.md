@@ -61,8 +61,9 @@ notifications marked as done is kept per host.
 ## Usage
 
 ```sh
-gh inbox list   [filters] [--summary | --json] [--limit n]
+gh inbox list   [filters | --rule name[,name] | --rules] [--summary | --json] [--limit n]
 gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all]
+gh inbox clean  --rule name[,name] | --rules [--rules-file file] [--apply]
 gh inbox triage [filters]
 ```
 
@@ -102,6 +103,40 @@ browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
   notifications, such as CI runs. Pull requests and issues that can't be read
   anymore are skipped and listed.
 
+### Rules
+
+Cleanups you repeat can be saved as rules in `~/.config/gh-inbox/rules.yml`
+(or `$XDG_CONFIG_HOME/gh-inbox/rules.yml`). Each rule has a name, an action
+(`done` unless given), and filters with the same names and values as the
+flags:
+
+```yaml
+rules:
+  - name: merged
+    filters:
+      state: [merged, closed]
+  - name: stale-ci
+    action: read
+    filters:
+      type: ci
+      older-than: 7d
+  - name: noisy-repos
+    action: unsubscribe
+    filters:
+      repo: ["acme/infra", "acme/docs-*"]
+      reason: subscribed
+```
+
+[`examples/rules.yml`](examples/rules.yml) is a starting point to copy.
+`gh inbox clean --rules` applies every rule, and `--rule merged,stale-ci` only
+those named. As with filters, nothing happens without `--apply`. `gh inbox
+list` takes `--rule` and `--rules` too, to show each notification the rules
+would act on.
+
+Rules apply in the order of the file, and a notification only goes to the
+first rule that matches it. A rule must have filters, and a mistake in any
+rule stops them all before anything is done.
+
 ### Examples
 
 ```sh
@@ -119,6 +154,9 @@ gh inbox list --newer-than 24h
 
 # Mark merged and closed pull requests and issues as done
 gh inbox clean --state merged,closed --apply
+
+# Apply every saved rule, for example from cron
+gh inbox clean --rules --apply
 
 # Open pull requests that are neither assigned to you nor waiting for your review
 gh inbox clean --type pr --state open --not-involves @me --apply
