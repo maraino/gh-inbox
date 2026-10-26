@@ -48,8 +48,7 @@ func (c *Client) retry(ctx context.Context, op func() error) error {
 func retryDelay(err error, attempt int, now time.Time) (time.Duration, bool) {
 	backoff := baseDelay << (attempt - 1)
 
-	var gqlErr *api.GraphQLError
-	if errors.As(err, &gqlErr) {
+	if gqlErr, ok := errors.AsType[*api.GraphQLError](err); ok {
 		for _, item := range gqlErr.Errors {
 			if item.Type == "RATE_LIMITED" {
 				return rateLimitDelay, true

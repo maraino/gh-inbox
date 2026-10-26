@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strconv"
@@ -152,9 +153,7 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			for k, v := range found {
-				details[k] = v
-			}
+			maps.Copy(details, found)
 			return nil
 		})
 	}
