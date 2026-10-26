@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"golang.org/x/sync/errgroup"
@@ -31,8 +32,9 @@ const (
 const (
 	prFragment = `
 fragment pr on PullRequest {
-  number state url
+  number state isDraft url
   author { login }
+  labels(first: 100) { nodes { name } }
   assignees(first: 100) { nodes { login } }
   reviewRequests(first: 100) {
     nodes {
@@ -49,6 +51,7 @@ fragment pr on PullRequest {
 fragment issue on Issue {
   number state url
   author { login }
+  labels(first: 100) { nodes { name } }
   assignees(first: 100) { nodes { login } }
 }`
 	// teamFields select the teams whose review is requested. Reading them
@@ -129,20 +132,42 @@ func subjectWebURL(apiURL string) string {
 // longer exist or that can't be read are missing from the result; any other
 // failure is an error.
 func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notification, opts DetailsOptions) (map[string]*inbox.Subject, error) {
+	// The latest activity on each subject, which a cached lookup must
+	// match.
+	updatedAt := make(map[string]time.Time)
+	for _, n := range notifications {
+		if n.Type.HasDetails() && n.UpdatedAt.After(updatedAt[n.SubjectURL]) {
+			updatedAt[n.SubjectURL] = n.UpdatedAt
+		}
+	}
+
+	cache := c.readDetails()
+	details := make(map[string]*inbox.Subject)
 	var refs []subjectRef
 	seen := make(map[string]bool)
 	for _, n := range notifications {
 		if !n.Type.HasDetails() || seen[n.SubjectURL] {
 			continue
 		}
+		seen[n.SubjectURL] = true
+		if s, ok := cache[n.SubjectURL]; ok && s.UpdatedAt.Equal(updatedAt[n.SubjectURL]) && (s.ReviewTeams || !opts.ReviewTeams) {
+			if s.Subject != nil {
+				details[n.SubjectURL] = s.Subject
+			}
+			continue
+		}
 		if ref, ok := parseSubjectRef(n.SubjectURL); ok {
 			refs = append(refs, ref)
-			seen[ref.url] = true
 		}
+	}
+	if len(refs) == 0 {
+		return details, nil
+	}
+	if cached := len(seen) - len(refs); cached > 0 {
+		c.logf("* Using the cached details of %d pull requests and issues", cached)
 	}
 
 	var mu sync.Mutex
-	details := make(map[string]*inbox.Subject, len(refs))
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(detailsConcurrency)
 	for batch := range slices.Chunk(refs, detailsBatchSize) {
@@ -160,17 +185,34 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 	if err := g.Wait(); err != nil {
 		return nil, fmt.Errorf("looking up pull requests and issues: %w", err)
 	}
+
+	if c.cacheDir != "" {
+		now := c.now()
+		for _, ref := range refs {
+			// Subjects that couldn't be read are cached as nil.
+			cache[ref.url] = cachedSubject{
+				FetchedAt: now, UpdatedAt: updatedAt[ref.url], ReviewTeams: opts.ReviewTeams, Subject: details[ref.url],
+			}
+		}
+		c.writeDetails(cache)
+	}
 	return details, nil
 }
 
 // apiSubject is the GraphQL shape of a pull request or issue.
 type apiSubject struct {
-	Number int    `json:"number"`
-	State  string `json:"state"`
-	URL    string `json:"url"`
-	Author *struct {
+	Number  int    `json:"number"`
+	State   string `json:"state"`
+	IsDraft bool   `json:"isDraft"`
+	URL     string `json:"url"`
+	Author  *struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	Labels struct {
+		Nodes []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"labels"`
 	Assignees struct {
 		Nodes []struct {
 			Login string `json:"login"`
@@ -284,7 +326,11 @@ func (s *apiSubject) toSubject() *inbox.Subject {
 	subject := &inbox.Subject{
 		Number: s.Number,
 		State:  inbox.State(strings.ToLower(s.State)),
+		Draft:  s.IsDraft,
 		URL:    s.URL,
+	}
+	for _, l := range s.Labels.Nodes {
+		subject.Labels = append(subject.Labels, l.Name)
 	}
 	if s.Author != nil {
 		subject.Author = s.Author.Login

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"slices"
 	"strconv"
@@ -40,12 +41,24 @@ type apiNotification struct {
 //
 // The API also lists threads that were marked as done and haven't had
 // activity since; it has no way to tell them apart from read ones.
+//
+// With a cache, the list is reused while the API says there's nothing new.
 func (c *Client) Notifications(ctx context.Context) ([]inbox.Notification, error) {
+	cached := c.readList()
+	since := ""
+	if cached != nil {
+		since = cached.LastModified
+	}
 	var first []apiNotification
-	links, err := c.get(ctx, notificationsPath, &first)
+	h, err := c.getIfModified(ctx, notificationsPath, since, &first)
+	if errors.Is(err, errNotModified) {
+		c.logf("* Notifications not modified since %s: using the cached list", since)
+		return cached.Notifications, nil
+	}
 	if err != nil {
 		return nil, err
 	}
+	links := parseLinks(h.Get("Link"))
 	pages := [][]apiNotification{first}
 
 	// The first page says how many there are, so the rest can be fetched
@@ -94,6 +107,7 @@ func (c *Client) Notifications(ctx context.Context) ([]inbox.Notification, error
 	slices.SortStableFunc(all, func(a, b inbox.Notification) int {
 		return b.UpdatedAt.Compare(a.UpdatedAt)
 	})
+	c.writeList(h.Get("Last-Modified"), all)
 	return all, nil
 }
 

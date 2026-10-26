@@ -30,6 +30,10 @@ type Options struct {
 	Read      bool
 	OlderThan time.Duration
 	NewerThan time.Duration
+	Draft     bool
+	NotDraft  bool
+	Labels    []string
+	NotLabels []string
 
 	Authors           []string
 	NotAuthors        []string
@@ -44,7 +48,8 @@ type Options struct {
 // IsEmpty reports whether no filter is set.
 func (o *Options) IsEmpty() bool {
 	return len(o.Repos) == 0 && len(o.Types) == 0 && len(o.Reasons) == 0 && len(o.States) == 0 &&
-		!o.Unread && !o.Read && o.OlderThan == 0 && o.NewerThan == 0 && len(o.people()) == 0
+		!o.Unread && !o.Read && o.OlderThan == 0 && o.NewerThan == 0 && !o.Draft && !o.NotDraft &&
+		len(o.Labels) == 0 && len(o.NotLabels) == 0 && len(o.people()) == 0
 }
 
 // NeedsIdentity reports whether a filter refers to the authenticated user.
@@ -87,6 +92,9 @@ func New(o *Options, env Env) (*Set, error) {
 	b.states(o.States)
 	b.unread(o.Unread, o.Read)
 	b.age(o.OlderThan, o.NewerThan)
+	b.draft(o.Draft, o.NotDraft)
+	b.labels("label", o.Labels, false)
+	b.labels("not-label", o.NotLabels, true)
 	b.people("author", o.Authors, author)
 	b.people("not-author", o.NotAuthors, author.not())
 	b.people("assigned-to", o.AssignedTo, assignee)
@@ -259,6 +267,34 @@ func (b *builder) age(olderThan, newerThan time.Duration) {
 			return n.UpdatedAt.After(cutoff)
 		})
 	}
+}
+
+func (b *builder) draft(draft, notDraft bool) {
+	switch {
+	case draft && notDraft:
+		b.errorf("--draft and --not-draft can't be used together")
+	case draft:
+		b.set.detailed = append(b.set.detailed, func(s *inbox.Subject) bool { return s.Draft })
+	case notDraft:
+		b.set.detailed = append(b.set.detailed, func(s *inbox.Subject) bool { return !s.Draft })
+	}
+}
+
+// labels adds a filter on the labels of a subject, which matches subjects
+// with any of the labels, or with none of them when negate.
+func (b *builder) labels(flag string, labels []string, negate bool) {
+	if len(labels) == 0 {
+		return
+	}
+	for _, l := range labels {
+		if strings.TrimSpace(l) == "" {
+			b.errorf("--%s: empty label", flag)
+		}
+	}
+	b.set.detailed = append(b.set.detailed, func(s *inbox.Subject) bool {
+		matched := slices.ContainsFunc(labels, func(l string) bool { return containsFold(s.Labels, l) })
+		return matched != negate
+	})
 }
 
 // person is a user or a set of teams, as given to a filter on people.

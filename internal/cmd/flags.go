@@ -24,6 +24,10 @@ func addFilterFlags(fs *pflag.FlagSet, o *filter.Options) {
 	fs.BoolVar(&o.Read, "read", false, "Only read notifications")
 	fs.Var((*ageValue)(&o.OlderThan), "older-than", "Only notifications without activity for `age`, such as 36h, 7d or 2w")
 	fs.Var((*ageValue)(&o.NewerThan), "newer-than", "Only notifications with activity in the last `age`, such as 24h or 7d")
+	fs.BoolVar(&o.Draft, "draft", false, "Only draft pull requests")
+	fs.BoolVar(&o.NotDraft, "not-draft", false, "Only pull requests that aren't drafts, and issues")
+	fs.StringSliceVar(&o.Labels, "label", nil, "Only pull requests and issues with the `label`")
+	fs.StringSliceVar(&o.NotLabels, "not-label", nil, "Only pull requests and issues without the `label`")
 
 	fs.StringSliceVar(&o.Authors, "author", nil, "Only pull requests and issues opened by `user`")
 	fs.StringSliceVar(&o.NotAuthors, "not-author", nil, "Only pull requests and issues not opened by `user`")

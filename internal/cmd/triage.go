@@ -16,6 +16,7 @@ import (
 
 type triageOptions struct {
 	filters filter.Options
+	rules   ruleFlags
 }
 
 func newTriageCmd(root *rootOptions, e *env) *cobra.Command {
@@ -31,39 +32,52 @@ time, most recently updated first, and handle each with a key:
   r  mark it as read
   u  unsubscribe from it
   s  skip it
-  q  quit
+  p  go back to the previous one
+  q  quit, as do Ctrl-C and Ctrl-D
 
-Without filters, it goes through them all. Notifications marked as done are
-added to the record "gh inbox clean" keeps.
+Without filters, it goes through them all. --rule goes through the
+notifications that rules from the rules file act on, and --rules through
+those of every rule; see "gh inbox clean --help" for the rules.
+Notifications marked as done are added to the record "gh inbox clean" keeps.
 ` + filterHelp,
 		Example: `  # Pull requests waiting for your review, or your teams'
   gh inbox triage --state open --review-requested @me
 
   # What's unread in some repositories
-  gh inbox triage --repo 'acme/*' --unread`,
+  gh inbox triage --repo 'acme/*' --unread
+
+  # What the rule old-subscribed would clean
+  gh inbox triage --rule old-subscribed`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runTriage(cmd.Context(), root, e, opts)
 		},
 	}
 	addFilterFlags(cmd.Flags(), &opts.filters)
+	opts.rules.add(cmd.Flags(), "Go through what the rule `name` from the rules file acts on, instead of filters",
+		"Go through what every rule in the rules file acts on")
 	return cmd
 }
 
 // triagePrompt lists the keys triage takes.
-const triagePrompt = "[o]pen [d]one [r]ead [u]nsubscribe [s]kip [q]uit: "
-
-// Keys that quit besides q: Ctrl-C and Ctrl-D, which don't send signals
-// while the terminal is in raw mode.
-const (
-	keyCtrlC = 3
-	keyCtrlD = 4
-)
+const triagePrompt = "[o]pen [d]one [r]ead [u]nsubscribe [s]kip [p]revious [q]uit: "
 
 func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptions) error {
-	if e.readKey == nil {
+	if e.openKeyboard == nil {
 		return errors.New(`triage needs a terminal: use "gh inbox list" and "gh inbox clean" in scripts`)
 	}
+	filters := []*filter.Options{&opts.filters}
+	if opts.rules.given() {
+		if !opts.filters.IsEmpty() {
+			return errors.New("rules can't be combined with filters")
+		}
+		rules, err := opts.rules.load(e)
+		if err != nil {
+			return err
+		}
+		filters = ruleFilters(rules)
+	}
+
 	c, err := root.client(e)
 	if err != nil {
 		return err
@@ -73,10 +87,11 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 		return err
 	}
 	p := progress{e.errOut, e.showProgress}
-	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), false, p)
+	sels, err := selectEach(ctx, c, filters, done, e.now(), false, p)
 	if err != nil {
 		return err
 	}
+	sel := merge(sels)
 	matched := sel.matched
 	if !sel.detailed {
 		err := lookUpDetails(ctx, c, matched, false, false, p)
@@ -90,95 +105,135 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 		return nil
 	}
 
+	// Ctrl-C cancels ctx, which stops a request and quits.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	kb, err := e.openKeyboard(cancel)
+	if err != nil {
+		return fmt.Errorf("reading keys from the terminal: %w", err)
+	}
+	defer kb.Close()
+	out := kb.Out(e.out)
+
+	// handled is the last action applied to each notification; counts and
+	// markedDone count every one, including those applied again after
+	// going back.
+	handled := make([]action.Kind, len(matched))
 	counts := make(map[action.Kind]int)
 	var markedDone []inbox.Notification
 	defer func() {
 		if done != nil && len(markedDone) > 0 {
 			if err := recordDone(done, markedDone, sel.listed); err != nil {
-				fmt.Fprintf(e.errOut, "warning: saving the record of notifications marked as done: %v\n", err)
+				fmt.Fprintf(out, "warning: saving the record of notifications marked as done: %v\n", err)
 			}
 		}
-		fmt.Fprintln(e.out)
-		handled := 0
+		fmt.Fprintln(out)
 		for _, kind := range []action.Kind{action.Done, action.Read, action.Unsubscribe} {
 			if counts[kind] > 0 {
-				fmt.Fprintf(e.out, "%s.\n", describePast(kind, counts[kind]))
-				handled += counts[kind]
+				fmt.Fprintf(out, "%s.\n", describePast(kind, counts[kind]))
 			}
 		}
-		if untouched := len(matched) - handled; untouched > 0 {
-			fmt.Fprintf(e.out, "Left %s untouched.\n", notifications(untouched))
+		untouched := 0
+		for _, kind := range handled {
+			if kind == "" {
+				untouched++
+			}
 		}
-		reportUnreadable(e.errOut, sel.unreadable)
+		if untouched > 0 {
+			fmt.Fprintf(out, "Left %s untouched.\n", notifications(untouched))
+		}
+		reportUnreadable(out, sel.unreadable)
 	}()
 
-	for i, n := range matched {
-		fmt.Fprintf(e.out, "\n(%d/%d) %s\n%s\n", i+1, len(matched), render.Heading(n, e.now()), n.Title)
+	for i := 0; i < len(matched); {
+		n := matched[i]
+		fmt.Fprintf(out, "\n(%d/%d) %s\n%s\n", i+1, len(matched), render.Heading(n, e.now()), n.Title)
 		url := root.webURL(n)
-		fmt.Fprintln(e.out, url)
-		fmt.Fprint(e.out, triagePrompt)
+		fmt.Fprintln(out, url)
+		if handled[i] != "" {
+			fmt.Fprintf(out, "Already %s.\n", describeOne(handled[i]))
+		}
+		fmt.Fprint(out, triagePrompt)
 
-	keys:
-		for {
-			// Ctrl-C pressed while the terminal isn't in raw mode, such as
-			// during a request, cancels ctx instead of being read as a key.
-			if err := ctx.Err(); err != nil {
-				fmt.Fprintln(e.out)
-				return err
-			}
-			key, err := e.readKey()
-			switch {
-			case errors.Is(err, io.EOF):
-				fmt.Fprintln(e.out, "quit")
-				return nil
-			case err != nil:
-				fmt.Fprintln(e.out)
-				return fmt.Errorf("reading a key: %w", err)
-			}
-
-			var kind action.Kind
-			switch key {
-			case 'o':
-				if err := e.openBrowser(url); err != nil {
-					fmt.Fprintf(e.out, "opening the browser failed: %v\n", err)
-				} else {
-					fmt.Fprintln(e.out, "opened")
-				}
-				fmt.Fprint(e.out, triagePrompt)
-				continue
-			case 's':
-				fmt.Fprintln(e.out, "skipped")
-				break keys
-			case 'q', keyCtrlC, keyCtrlD:
-				fmt.Fprintln(e.out, "quit")
-				return nil
-			case 'd':
-				kind = action.Done
-			case 'r':
-				kind = action.Read
-			case 'u':
-				kind = action.Unsubscribe
-			default:
-				continue
-			}
-
-			if err := action.Apply(ctx, c, kind, n.ID); err != nil {
-				fmt.Fprintf(e.out, "failed: %v\n", err)
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				fmt.Fprint(e.out, triagePrompt)
-				continue
-			}
+		next, err := triageOne(ctx, e, c, kb, out, n, url, func(kind action.Kind) {
+			handled[i] = kind
 			counts[kind]++
 			if kind == action.Done {
 				markedDone = append(markedDone, n)
 			}
-			fmt.Fprintln(e.out, describeOne(kind))
-			break keys
+		})
+		if err != nil || next == 0 {
+			return err
+		}
+		switch {
+		case next < 0 && i == 0:
+			fmt.Fprintln(out, "This is the first one.")
+		case next < 0:
+			i--
+		default:
+			i++
 		}
 	}
 	return nil
+}
+
+// triageOne reads keys until one moves to another notification, and returns
+// 1 to move to the next one, -1 to the previous one, and 0 to quit. The
+// applied is called with each action applied to n.
+func triageOne(ctx context.Context, e *env, c client, kb keyboard, out io.Writer, n inbox.Notification, url string, applied func(action.Kind)) (int, error) {
+	for {
+		key, err := kb.ReadKey(ctx)
+		switch {
+		case errors.Is(err, io.EOF) || (err != nil && ctx.Err() != nil):
+			fmt.Fprintln(out, "quit")
+			return 0, nil
+		case err != nil:
+			fmt.Fprintln(out)
+			return 0, fmt.Errorf("reading a key: %w", err)
+		}
+
+		var kind action.Kind
+		switch key {
+		case 'o':
+			if err := e.openBrowser(url); err != nil {
+				fmt.Fprintf(out, "opening the browser failed: %v\n", err)
+			} else {
+				fmt.Fprintln(out, "opened")
+			}
+			fmt.Fprint(out, triagePrompt)
+			continue
+		case 's':
+			fmt.Fprintln(out, "skipped")
+			return 1, nil
+		case 'p':
+			fmt.Fprintln(out, "previous")
+			return -1, nil
+		case 'q', keyCtrlC, keyCtrlD:
+			fmt.Fprintln(out, "quit")
+			return 0, nil
+		case 'd':
+			kind = action.Done
+		case 'r':
+			kind = action.Read
+		case 'u':
+			kind = action.Unsubscribe
+		default:
+			continue
+		}
+
+		if err := action.Apply(ctx, c, kind, n.ID); err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(out, "interrupted")
+				return 0, nil
+			}
+			fmt.Fprintf(out, "failed: %v\n", err)
+			fmt.Fprint(out, triagePrompt)
+			continue
+		}
+		applied(kind)
+		fmt.Fprintln(out, describeOne(kind))
+		return 1, nil
+	}
 }
 
 // describeOne says what an action did to a single notification, such as

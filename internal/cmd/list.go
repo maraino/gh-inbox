@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/maraino/gh-inbox/internal/filter"
+	"github.com/maraino/gh-inbox/internal/inbox"
 	"github.com/maraino/gh-inbox/internal/render"
 )
 
@@ -110,6 +111,7 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 		err = render.JSON(e.out, matched)
 	case opts.summary:
 		err = render.Summary(e.out, matched)
+		hintUnwatch(e, matched)
 	case len(matched) == 0:
 		fmt.Fprintln(e.errOut, "No notifications match.")
 	default:
@@ -120,4 +122,16 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 	}
 	reportUnreadable(e.errOut, sel.unreadable)
 	return nil
+}
+
+// hintUnwatch points to "gh inbox unwatch" when a person reading a summary
+// has notifications from repositories they watch.
+func hintUnwatch(e *env, matched []inbox.Notification) {
+	if !e.showProgress {
+		return
+	}
+	if n := total(watchedRepos(matched)); n > 0 {
+		fmt.Fprintf(e.errOut, "\n%s, with reason %q, are from repositories you watch. \"gh inbox unwatch\" shows which ones.\n",
+			notifications(n), reasonWatching)
+	}
 }

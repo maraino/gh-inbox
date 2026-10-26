@@ -64,7 +64,8 @@ notifications marked as done is kept per host.
 gh inbox list   [filters | --rule name[,name] | --rules] [--summary | --json] [--limit n]
 gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all]
 gh inbox clean  --rule name[,name] | --rules [--rules-file file] [--apply]
-gh inbox triage [filters]
+gh inbox triage [filters | --rule name[,name] | --rules]
+gh inbox unwatch [owner/name...] [--apply]
 ```
 
 `list` shows the notifications that match the filters, most recently updated
@@ -72,7 +73,16 @@ first. `clean` acts on them: it only shows what it would do unless you pass
 `--apply`, and it refuses to act on every notification unless you pass `--all`.
 `triage` goes through them one at a time: press `o` to open one in the
 browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
-`s` to skip it, or `q` to quit.
+`s` to skip it, `p` to go back to the previous one, or `q` to quit. Keys
+pressed while a request runs are ignored, as are pasted text and keys with
+Alt, so a stray key can't act on the next notification.
+
+`unwatch` stops watching repositories, which is where the notifications with
+reason `subscribed` come from. Without arguments, it lists those repositories,
+most notifications first; with names or `*` patterns, it shows which ones it
+would stop watching, and does it with `--apply`. Threads you take part in or
+are mentioned in still notify you, and the notifications already in the inbox
+stay until you clean them.
 
 ### Filters
 
@@ -85,6 +95,8 @@ browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
 | `--unread`, `--read` | Read status |
 | `--older-than` | No activity for a while: `36h`, `7d`, `2w` |
 | `--newer-than` | Activity recently: `24h`, `7d`; with `--older-than`, a window |
+| `--draft`, `--not-draft` | Draft pull requests, or pull requests that aren't drafts and issues |
+| `--label`, `--not-label` | Labels of the pull request or issue, ignoring case |
 | `--author`, `--not-author` | Who opened the pull request or issue |
 | `--assigned-to`, `--not-assigned-to` | The assignees |
 | `--review-requested`, `--no-review-requested` | Users or `org/team`s whose review is requested |
@@ -130,8 +142,8 @@ rules:
 [`examples/rules.yml`](examples/rules.yml) is a starting point to copy.
 `gh inbox clean --rules` applies every rule, and `--rule merged,stale-ci` only
 those named. As with filters, nothing happens without `--apply`. `gh inbox
-list` takes `--rule` and `--rules` too, to show each notification the rules
-would act on.
+list` and `gh inbox triage` take `--rule` and `--rules` too, to show or go
+through each notification the rules would act on.
 
 Rules apply in the order of the file, and a notification only goes to the
 first rule that matches it. A rule must have filters, and a mistake in any
@@ -151,6 +163,13 @@ gh inbox triage --state open --review-requested @me
 
 # What happened in the last day
 gh inbox list --newer-than 24h
+
+# Repositories you watch that fill the inbox, and stop watching one
+gh inbox unwatch
+gh inbox unwatch acme/infra --apply
+
+# Draft pull requests labeled dependencies
+gh inbox list --draft --label dependencies
 
 # Mark merged and closed pull requests and issues as done
 gh inbox clean --state merged,closed --apply
@@ -179,6 +198,22 @@ ones. So gh-inbox keeps a record of the notifications it marked as done, in
 skips them until they have new activity. Notifications marked as done
 elsewhere, such as on github.com, aren't in the record, and `clean` marks them
 as done again, which is harmless. `--no-cache` ignores the record.
+
+### Cache
+
+To make running several commands in a row fast, gh-inbox caches API responses
+in `~/.cache/gh-inbox/<host>` (or under `$XDG_CACHE_HOME`):
+
+- The list of notifications is reused for up to 10 minutes while GitHub says
+  there's nothing new, which it answers without counting against the rate
+  limit. Marking a notification as done or read, or unsubscribing, with
+  gh-inbox starts a new list. A notification read on github.com can show as
+  unread until the list is renewed.
+- The details of a pull request or issue, such as its state and labels, are
+  reused for up to an hour while its notification has no new activity. Some
+  changes, such as new labels, don't count as activity.
+
+`--no-cache` ignores the cache, as well as the record of done notifications.
 
 ### Other flags
 

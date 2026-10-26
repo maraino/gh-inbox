@@ -119,8 +119,10 @@ type jsonNotification struct {
 type jsonSubject struct {
 	Number      int      `json:"number"`
 	State       string   `json:"state"`
+	Draft       bool     `json:"draft"`
 	URL         string   `json:"url"`
 	Author      string   `json:"author"`
+	Labels      []string `json:"labels"`
 	Assignees   []string `json:"assignees"`
 	ReviewUsers []string `json:"review_requested_users"`
 	ReviewTeams []string `json:"review_requested_teams"`
@@ -145,8 +147,10 @@ func JSON(w io.Writer, notifications []inbox.Notification) error {
 			out[i].Subject = &jsonSubject{
 				Number:      s.Number,
 				State:       string(s.State),
+				Draft:       s.Draft,
 				URL:         s.URL,
 				Author:      s.Author,
+				Labels:      nonNil(s.Labels),
 				Assignees:   nonNil(s.Assignees),
 				ReviewUsers: nonNil(s.ReviewUsers),
 				ReviewTeams: nonNil(s.ReviewTeams),
@@ -176,7 +180,7 @@ func Heading(n inbox.Notification, now time.Time) string {
 	}
 	parts = append(parts, n.Type.ShortName())
 	if n.Subject != nil {
-		parts = append(parts, string(n.Subject.State))
+		parts = append(parts, state(n))
 	}
 	parts = append(parts, n.Reason)
 	if n.Subject != nil && n.Subject.Author != "" {
@@ -195,13 +199,17 @@ func number(n inbox.Notification) string {
 	return fmt.Sprintf("#%d", n.Number)
 }
 
-// state returns the state of the notification's subject, or "-" when it's
-// unknown.
+// state returns the state of the notification's subject, "draft" for an
+// open draft pull request, or "-" when it's unknown.
 func state(n inbox.Notification) string {
-	if n.Subject == nil {
+	switch {
+	case n.Subject == nil:
 		return "-"
+	case n.Subject.State == inbox.StateOpen && n.Subject.Draft:
+		return "draft"
+	default:
+		return string(n.Subject.State)
 	}
-	return string(n.Subject.State)
 }
 
 // updated formats a time as how long ago it was on a terminal, and in RFC

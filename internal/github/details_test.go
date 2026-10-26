@@ -90,8 +90,9 @@ func TestSubjectDetails(t *testing.T) {
 		w.Write([]byte(`{
 			"data": {
 				"s0": {"pullRequest": {
-					"number": 7, "state": "MERGED", "url": "https://github.com/o/r/pull/7",
+					"number": 7, "state": "MERGED", "isDraft": true, "url": "https://github.com/o/r/pull/7",
 					"author": {"login": "alice"},
+					"labels": {"nodes": [{"name": "bug"}, {"name": "backend"}]},
 					"assignees": {"nodes": [{"login": "bob"}]},
 					"reviewRequests": {"nodes": [
 						{"requestedReviewer": {"__typename": "User", "login": "carol"}},
@@ -115,8 +116,8 @@ func TestSubjectDetails(t *testing.T) {
 	}
 	want := map[string]*inbox.Subject{
 		"https://api.github.com/repos/o/r/pulls/7": {
-			Number: 7, State: inbox.StateMerged, URL: "https://github.com/o/r/pull/7", Author: "alice",
-			Assignees: []string{"bob"}, ReviewUsers: []string{"carol"}, ReviewTeams: []string{"o/backend"},
+			Number: 7, State: inbox.StateMerged, Draft: true, URL: "https://github.com/o/r/pull/7", Author: "alice",
+			Labels: []string{"bug", "backend"}, Assignees: []string{"bob"}, ReviewUsers: []string{"carol"}, ReviewTeams: []string{"o/backend"},
 		},
 		"https://api.github.com/repos/o/r/issues/8": {
 			Number: 8, State: inbox.StateOpen, URL: "https://github.com/o/r/issues/8",

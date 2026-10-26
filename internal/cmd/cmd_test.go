@@ -77,6 +77,8 @@ func (c *fakeClient) MarkDone(_ context.Context, id string) error    { return c.
 func (c *fakeClient) MarkRead(_ context.Context, id string) error    { return c.act("read", id) }
 func (c *fakeClient) Unsubscribe(_ context.Context, id string) error { return c.act("unsubscribe", id) }
 
+func (c *fakeClient) Unwatch(_ context.Context, repo string) error { return c.act("unwatch", repo) }
+
 // newFakeInbox returns a client with an inbox of four notifications:
 //
 //  1. a merged pull request assigned to me

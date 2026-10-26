@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"slices"
 	"strings"
@@ -14,13 +15,8 @@ import (
 // browser.
 func terminal(keys string, opened *[]string) func(*env) {
 	return func(e *env) {
-		r := strings.NewReader(keys)
-		e.readKey = func() (byte, error) {
-			b, err := r.ReadByte()
-			if err != nil {
-				return 0, io.EOF
-			}
-			return b, nil
+		e.openKeyboard = func(interrupt func()) (keyboard, error) {
+			return &fakeKeyboard{keys: strings.NewReader(keys), interrupt: interrupt}, nil
 		}
 		e.openBrowser = func(url string) error {
 			*opened = append(*opened, url)
@@ -28,6 +24,31 @@ func terminal(keys string, opened *[]string) func(*env) {
 		}
 	}
 }
+
+// fakeKeyboard types keys one at a time. Ctrl-C interrupts, as on a
+// terminal.
+type fakeKeyboard struct {
+	keys      *strings.Reader
+	interrupt func()
+}
+
+func (k *fakeKeyboard) ReadKey(ctx context.Context) (byte, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	b, err := k.keys.ReadByte()
+	if err != nil {
+		return 0, io.EOF
+	}
+	if b == keyCtrlC {
+		k.interrupt()
+		return 0, ctx.Err()
+	}
+	return b, nil
+}
+
+func (k *fakeKeyboard) Out(w io.Writer) io.Writer { return w }
+func (k *fakeKeyboard) Close() error              { return nil }
 
 func TestTriage(t *testing.T) {
 	c := newFakeInbox()
@@ -112,5 +133,73 @@ func TestWebURL(t *testing.T) {
 		if got := o.webURL(tt.n); got != tt.want {
 			t.Errorf("webURL(%+v) = %q, want %q", tt.n, got, tt.want)
 		}
+	}
+}
+
+func TestTriagePrevious(t *testing.T) {
+	c := newFakeInbox()
+	cacheDir := t.TempDir()
+	var opened []string
+	// Going back from the first does nothing. Mark the merged pull request
+	// as done, go back to it, mark it as read, then quit.
+	got := runEnv(t, c, cacheDir, terminal("pdprq", &opened), "triage")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if want := []string{"done 1", "read 1"}; !slices.Equal(c.actions, want) {
+		t.Errorf("actions = %v, want %v", c.actions, want)
+	}
+	for _, want := range []string{
+		triagePrompt + "previous\nThis is the first one.\n\n(1/4) ",
+		"marked as done\n\n(2/4) ",
+		triagePrompt + "previous\n\n(1/4) acme/api #1 · pr · merged · review_requested · 1h ago\nMerged fix\n" +
+			"https://github.com/acme/api/pull/1\nAlready marked as done.\n" + triagePrompt + "marked as read\n",
+		"\nMarked 1 notification as done.\nMarked 1 notification as read.\nLeft 3 notifications untouched.\n",
+	} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout doesn't contain %q:\n%s", want, got.stdout)
+		}
+	}
+
+	// It was marked as done, so it's left out the next time.
+	c.actions = nil
+	got = runEnv(t, c, cacheDir, terminal("q", &opened), "triage")
+	if !strings.Contains(got.stdout, "(1/3) acme/web #2") {
+		t.Errorf("the thread marked as done wasn't left out:\n%s", got.stdout)
+	}
+}
+
+func TestTriageInterrupt(t *testing.T) {
+	c := newFakeInbox()
+	var opened []string
+	got := runEnv(t, c, t.TempDir(), terminal("s\x03d", &opened), "triage")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if len(c.actions) != 0 {
+		t.Errorf("actions = %v, want none", c.actions)
+	}
+	if want := "(2/4) acme/web #2"; !strings.Contains(got.stdout, want) || !strings.Contains(got.stdout, triagePrompt+"quit\n") {
+		t.Errorf("stdout doesn't quit at notification 2:\n%s", got.stdout)
+	}
+}
+
+func TestTriageRules(t *testing.T) {
+	c := newFakeInbox()
+	var opened []string
+	got := runEnv(t, c, t.TempDir(), terminal("rq", &opened), "triage", "--rule", "stale-ci", "--rules-file", writeRules(t, testRules))
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if want := []string{"read 3"}; !slices.Equal(c.actions, want) {
+		t.Errorf("actions = %v, want %v", c.actions, want)
+	}
+	if !strings.Contains(got.stdout, "(1/1) acme/api · ci") {
+		t.Errorf("stdout doesn't show only the CI run:\n%s", got.stdout)
+	}
+
+	got = runEnv(t, c, t.TempDir(), terminal("q", &opened), "triage", "--rule", "stale-ci", "--type", "pr")
+	if got.err == nil || !strings.Contains(got.err.Error(), "can't be combined") {
+		t.Errorf("error = %v, want rules and filters refused", got.err)
 	}
 }
