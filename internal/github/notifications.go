@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 
@@ -89,6 +90,10 @@ func (c *Client) Notifications(ctx context.Context) ([]inbox.Notification, error
 			})
 		}
 	}
+	// The API mostly lists them by update time, but not always.
+	slices.SortStableFunc(all, func(a, b inbox.Notification) int {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
 	return all, nil
 }
 

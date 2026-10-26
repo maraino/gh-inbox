@@ -88,7 +88,7 @@ func newFakeInbox() *fakeClient {
 		return inbox.Notification{
 			ID: id, Repo: repo, Type: inbox.TypePullRequest, Title: title, Reason: "review_requested",
 			UpdatedAt: now.Add(-updated), SubjectURL: fmt.Sprintf("https://api.github.com/repos/%s/pulls/%d", repo, num),
-			Number: num,
+			Number: num, URL: fmt.Sprintf("https://github.com/%s/pull/%d", repo, num),
 		}
 	}
 	return &fakeClient{
@@ -118,6 +118,13 @@ type result struct {
 // of threads marked as done lives in cacheDir.
 func run(t *testing.T, c *fakeClient, cacheDir string, args ...string) result {
 	t.Helper()
+	return runEnv(t, c, cacheDir, func(*env) {}, args...)
+}
+
+// runEnv is run with changes to the environment, such as a terminal to read
+// keys from.
+func runEnv(t *testing.T, c *fakeClient, cacheDir string, change func(*env), args ...string) result {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	e := &env{
 		out:       &stdout,
@@ -128,6 +135,7 @@ func run(t *testing.T, c *fakeClient, cacheDir string, args ...string) result {
 			return filepath.Join(cacheDir, host, "done.json"), nil
 		},
 	}
+	change(e)
 	cmd := newRootCmd(e)
 	cmd.SetArgs(append([]string{"--hostname", "github.com"}, args...))
 	err := cmd.ExecuteContext(t.Context())
@@ -153,6 +161,11 @@ func TestList(t *testing.T) {
 			name:       "filter on the notification",
 			args:       []string{"list", "--type", "ci", "--older-than", "7d"},
 			wantStdout: "acme/api\t-\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n",
+		},
+		{
+			name:       "newer than",
+			args:       []string{"list", "--newer-than", "90m"},
+			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
 		},
 		{
 			name:       "filter on details reports unreadable subjects",
@@ -249,6 +262,7 @@ func TestListErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"list", "--type", "pull"},
 		{"list", "--older-than", "soon"},
+		{"list", "--newer-than", "1d", "--older-than", "2d"},
 		{"list", "--limit", "-1"},
 		{"list", "--assigned-to", "acme/backend"},
 		{"list", "extra"},

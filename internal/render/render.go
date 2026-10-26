@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -163,6 +164,26 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// Heading describes a notification on one line, for showing it on its own:
+// its repository and number, type, state, reason, author and how long ago it
+// was updated.
+func Heading(n inbox.Notification, now time.Time) string {
+	parts := []string{n.Repo}
+	if n.Number != 0 {
+		parts[0] += " " + number(n)
+	}
+	parts = append(parts, n.Type.ShortName())
+	if n.Subject != nil {
+		parts = append(parts, string(n.Subject.State))
+	}
+	parts = append(parts, n.Reason)
+	if n.Subject != nil && n.Subject.Author != "" {
+		parts = append(parts, "by "+n.Subject.Author)
+	}
+	parts = append(parts, updated(n.UpdatedAt, true, now))
+	return strings.Join(parts, " · ")
 }
 
 // number returns the number of the notification's pull request or issue,

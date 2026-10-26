@@ -94,6 +94,16 @@ func TestMatch(t *testing.T) {
 			want: []string{"closed issue", "ci run"},
 		},
 		{
+			name: "newer than",
+			opts: Options{NewerThan: 24 * time.Hour},
+			want: []string{"open pr for my team", "unreadable pr"},
+		},
+		{
+			name: "between ages",
+			opts: Options{OlderThan: 24 * time.Hour, NewerThan: 14 * 24 * time.Hour},
+			want: []string{"merged pr for me", "ci run"},
+		},
+		{
 			name: "author",
 			opts: Options{Authors: []string{"@me"}},
 			want: []string{"closed issue"},
@@ -237,6 +247,8 @@ func TestNewErrors(t *testing.T) {
 		{name: "unknown state", opts: Options{States: []string{"draft"}}},
 		{name: "read and unread", opts: Options{Read: true, Unread: true}},
 		{name: "negative age", opts: Options{OlderThan: -time.Hour}},
+		{name: "negative newer age", opts: Options{NewerThan: -time.Hour}},
+		{name: "ages that don't overlap", opts: Options{OlderThan: 7 * 24 * time.Hour, NewerThan: 24 * time.Hour}},
 		{name: "team as assignee", opts: Options{AssignedTo: []string{"acme/backend"}}},
 		{name: "team as author", opts: Options{Authors: []string{"acme/backend"}}},
 		{name: "invalid team", opts: Options{ReviewRequested: []string{"acme/"}}},

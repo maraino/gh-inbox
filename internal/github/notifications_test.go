@@ -101,6 +101,29 @@ func TestNotificationsPages(t *testing.T) {
 	}
 }
 
+func TestNotificationsSorted(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`[
+			{"id": "1", "updated_at": "2026-10-23T18:58:01Z"},
+			{"id": "2", "updated_at": "2026-10-23T19:00:54Z"},
+			{"id": "3", "updated_at": "2026-10-23T18:40:24Z"},
+			{"id": "4", "updated_at": "2026-10-23T18:58:01Z"}
+		]`))
+	}))
+	got, err := c.Notifications(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, len(got))
+	for i, n := range got {
+		ids[i] = n.ID
+	}
+	// Those updated at the same time keep the API's order.
+	if want := []string{"2", "1", "4", "3"}; !slices.Equal(ids, want) {
+		t.Errorf("Notifications() IDs = %v, want %v", ids, want)
+	}
+}
+
 func TestPageURLs(t *testing.T) {
 	const base = "https://api.github.com/notifications?all=true&per_page=50&page="
 	tests := []struct {

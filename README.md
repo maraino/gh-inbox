@@ -63,11 +63,15 @@ notifications marked as done is kept per host.
 ```sh
 gh inbox list   [filters] [--summary | --json] [--limit n]
 gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all]
+gh inbox triage [filters]
 ```
 
 `list` shows the notifications that match the filters, most recently updated
 first. `clean` acts on them: it only shows what it would do unless you pass
 `--apply`, and it refuses to act on every notification unless you pass `--all`.
+`triage` goes through them one at a time: press `o` to open one in the
+browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
+`s` to skip it, or `q` to quit.
 
 ### Filters
 
@@ -79,6 +83,7 @@ first. `clean` acts on them: it only shows what it would do unless you pass
 | `--state` | `open`, `closed`, `merged` |
 | `--unread`, `--read` | Read status |
 | `--older-than` | No activity for a while: `36h`, `7d`, `2w` |
+| `--newer-than` | Activity recently: `24h`, `7d`; with `--older-than`, a window |
 | `--author`, `--not-author` | Who opened the pull request or issue |
 | `--assigned-to`, `--not-assigned-to` | The assignees |
 | `--review-requested`, `--no-review-requested` | Users or `org/team`s whose review is requested |
@@ -105,6 +110,12 @@ gh inbox list --summary
 
 # Pull requests waiting for your review, or your teams'
 gh inbox list --state open --review-requested @me
+
+# Go through the reviews you owe one at a time
+gh inbox triage --state open --review-requested @me
+
+# What happened in the last day
+gh inbox list --newer-than 24h
 
 # Mark merged and closed pull requests and issues as done
 gh inbox clean --state merged,closed --apply
