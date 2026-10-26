@@ -163,6 +163,11 @@ func TestList(t *testing.T) {
 			wantStdout: "acme/api\t-\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n",
 		},
 		{
+			name:       "newer than",
+			args:       []string{"list", "--newer-than", "90m"},
+			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
+		},
+		{
 			name:       "filter on details reports unreadable subjects",
 			args:       []string{"list", "--state", "merged,closed"},
 			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
@@ -257,6 +262,7 @@ func TestListErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"list", "--type", "pull"},
 		{"list", "--older-than", "soon"},
+		{"list", "--newer-than", "1d", "--older-than", "2d"},
 		{"list", "--limit", "-1"},
 		{"list", "--assigned-to", "acme/backend"},
 		{"list", "extra"},

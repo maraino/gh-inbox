@@ -29,6 +29,7 @@ type Options struct {
 	Unread    bool
 	Read      bool
 	OlderThan time.Duration
+	NewerThan time.Duration
 
 	Authors           []string
 	NotAuthors        []string
@@ -43,7 +44,7 @@ type Options struct {
 // IsEmpty reports whether no filter is set.
 func (o *Options) IsEmpty() bool {
 	return len(o.Repos) == 0 && len(o.Types) == 0 && len(o.Reasons) == 0 && len(o.States) == 0 &&
-		!o.Unread && !o.Read && o.OlderThan == 0 && len(o.people()) == 0
+		!o.Unread && !o.Read && o.OlderThan == 0 && o.NewerThan == 0 && len(o.people()) == 0
 }
 
 // NeedsIdentity reports whether a filter refers to the authenticated user.
@@ -59,7 +60,7 @@ func (o *Options) people() []string {
 
 // Env is what the filters need besides the notifications.
 type Env struct {
-	// Now is the time --older-than counts back from.
+	// Now is the time --older-than and --newer-than count back from.
 	Now time.Time
 	// Me is the authenticated user. It's only needed when a filter refers
 	// to @me.
@@ -85,7 +86,7 @@ func New(o *Options, env Env) (*Set, error) {
 	b.reasons(o.Reasons)
 	b.states(o.States)
 	b.unread(o.Unread, o.Read)
-	b.olderThan(o.OlderThan)
+	b.age(o.OlderThan, o.NewerThan)
 	b.people("author", o.Authors, author)
 	b.people("not-author", o.NotAuthors, author.not())
 	b.people("assigned-to", o.AssignedTo, assignee)
@@ -237,14 +238,25 @@ func (b *builder) unread(unread, read bool) {
 	}
 }
 
-func (b *builder) olderThan(d time.Duration) {
+func (b *builder) age(olderThan, newerThan time.Duration) {
 	switch {
-	case d < 0:
+	case olderThan < 0:
 		b.errorf("--older-than: the age can't be negative")
-	case d > 0:
-		cutoff := b.env.Now.Add(-d)
+	case olderThan > 0:
+		cutoff := b.env.Now.Add(-olderThan)
 		b.set.basic = append(b.set.basic, func(n inbox.Notification) bool {
 			return n.UpdatedAt.Before(cutoff)
+		})
+	}
+	switch {
+	case newerThan < 0:
+		b.errorf("--newer-than: the age can't be negative")
+	case newerThan > 0 && olderThan >= newerThan:
+		b.errorf("--newer-than must be longer than --older-than, or nothing matches")
+	case newerThan > 0:
+		cutoff := b.env.Now.Add(-newerThan)
+		b.set.basic = append(b.set.basic, func(n inbox.Notification) bool {
+			return n.UpdatedAt.After(cutoff)
 		})
 	}
 }

@@ -83,6 +83,7 @@ browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
 | `--state` | `open`, `closed`, `merged` |
 | `--unread`, `--read` | Read status |
 | `--older-than` | No activity for a while: `36h`, `7d`, `2w` |
+| `--newer-than` | Activity recently: `24h`, `7d`; with `--older-than`, a window |
 | `--author`, `--not-author` | Who opened the pull request or issue |
 | `--assigned-to`, `--not-assigned-to` | The assignees |
 | `--review-requested`, `--no-review-requested` | Users or `org/team`s whose review is requested |
@@ -112,6 +113,9 @@ gh inbox list --state open --review-requested @me
 
 # Go through the reviews you owe one at a time
 gh inbox triage --state open --review-requested @me
+
+# What happened in the last day
+gh inbox list --newer-than 24h
 
 # Mark merged and closed pull requests and issues as done
 gh inbox clean --state merged,closed --apply
