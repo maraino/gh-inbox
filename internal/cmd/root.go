@@ -49,6 +49,8 @@ type env struct {
 	now          func() time.Time
 	newClient    func(github.Options) (client, error)
 	cachePath    func(host string) (string, error)
+	// rulesPath returns where the rules file is.
+	rulesPath func() (string, error)
 	// readKey reads a key press from the terminal. It's nil when stdin or
 	// stdout isn't a terminal.
 	readKey func() (byte, error)
@@ -75,6 +77,7 @@ func defaultEnv() *env {
 		now:          time.Now,
 		newClient:    func(opts github.Options) (client, error) { return github.New(opts) },
 		cachePath:    cache.DefaultPath,
+		rulesPath:    defaultRulesPath,
 		readKey:      readKey,
 		// Finding the browser reads the gh configuration, so only do it
 		// when one is opened.

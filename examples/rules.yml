@@ -1,0 +1,39 @@
+# Rules for "gh inbox clean". Copy this file to ~/.config/gh-inbox/rules.yml
+# and adjust it to your inbox.
+#
+#   gh inbox clean --rules                 # show what every rule would do
+#   gh inbox clean --rule stale-ci         # only one rule
+#   gh inbox clean --rules --apply         # do it
+#
+# Each rule has a name, an action (done, read or unsubscribe; done if left
+# out) and filters with the same names and values as the flags of
+# "gh inbox list". Rules apply in order, and a notification only goes to the
+# first rule that matches it.
+#
+# Marking as done is the safest action: a thread marked as done comes back
+# when there's new activity on it.
+rules:
+  # Pull requests and issues that are finished.
+  - name: merged
+    filters:
+      state: [merged, closed]
+
+  # CI runs nobody looked at for a week.
+  - name: stale-ci
+    filters:
+      type: ci
+      older-than: 7d
+
+  # Releases older than two weeks.
+  - name: old-releases
+    filters:
+      type: release
+      older-than: 14d
+
+  # Threads you only watch, without activity for a month, that neither
+  # are assigned to you nor wait for your review.
+  - name: old-subscribed
+    filters:
+      reason: subscribed
+      older-than: 30d
+      not-involves: "@me"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +21,9 @@ type cleanOptions struct {
 	apply       bool
 	all         bool
 	concurrency int
+	rules       ruleFlags
+	// actionSet reports whether --action was given.
+	actionSet bool
 }
 
 func newCleanCmd(root *rootOptions, e *env) *cobra.Command {
@@ -38,6 +42,30 @@ Marking as done removes notifications from the inbox; they stay under the
 can't tell done notifications apart from read ones, so gh inbox keeps a local
 record of the ones it marked as done and skips them until they have new
 activity. --no-cache ignores the record.
+
+Instead of filters and --action, --rule applies rules from a rules file, and
+--rules applies every rule in it. The file is ~/.config/gh-inbox/rules.yml,
+or gh-inbox/rules.yml under $XDG_CONFIG_HOME, unless --rules-file is given.
+Each rule has a name, an action (done by default), and filters with the same
+names and values as the flags:
+
+  rules:
+    - name: merged
+      filters:
+        state: [merged, closed]
+    - name: stale-ci
+      action: read
+      filters:
+        type: ci
+        older-than: 7d
+    - name: noisy-repos
+      action: unsubscribe
+      filters:
+        repo: ["acme/infra", "acme/docs-*"]
+        reason: subscribed
+
+Rules apply in the order of the file, and a notification only goes to the
+first rule it matches. A rule must have filters.
 ` + filterHelp,
 		Example: `  # Show what marking merged and closed pull requests as done would do
   gh inbox clean --state merged,closed
@@ -52,9 +80,19 @@ activity. --no-cache ignores the record.
   gh inbox clean --type ci --older-than 7d --action read --apply
 
   # Stop following threads you only subscribed to in some repositories
-  gh inbox clean --repo 'acme/*' --reason subscribed --action unsubscribe --apply`,
+  gh inbox clean --repo 'acme/*' --reason subscribed --action unsubscribe --apply
+
+  # Show what every rule in the rules file would do
+  gh inbox clean --rules
+
+  # Apply two of them
+  gh inbox clean --rule merged,stale-ci --apply`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts.actionSet = cmd.Flags().Changed("action")
+			if opts.rules.given() {
+				return runCleanRules(cmd.Context(), root, e, opts)
+			}
 			return runClean(cmd.Context(), root, e, opts)
 		},
 	}
@@ -65,6 +103,8 @@ activity. --no-cache ignores the record.
 	flags.BoolVar(&opts.apply, "apply", false, "Apply the action; without it, only show what it would do")
 	flags.BoolVar(&opts.all, "all", false, "Allow cleaning without filters, which acts on every notification")
 	flags.IntVar(&opts.concurrency, "concurrency", 4, "How many requests to make at the same time")
+	opts.rules.add(flags, "Apply the rule `name` from the rules file, instead of filters",
+		"Apply every rule in the rules file")
 	return cmd
 }
 
@@ -108,17 +148,7 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 		return nil
 	}
 
-	runner := action.Runner{
-		Client:      c,
-		Kind:        kind,
-		Concurrency: opts.concurrency,
-		Progress: func(finished, total int) {
-			p.show("%d/%d", finished, total)
-		},
-	}
-	succeeded, failed := runner.Run(ctx, sel.matched)
-	p.clear()
-
+	succeeded, failed := applyAction(ctx, c, kind, sel.matched, opts.concurrency, p)
 	if kind == action.Done && done != nil {
 		if err := recordDone(done, succeeded, sel.listed); err != nil {
 			fmt.Fprintf(e.errOut, "warning: saving the record of notifications marked as done: %v\n", err)
@@ -129,13 +159,113 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 		fmt.Fprintf(e.out, "%s.\n", describePast(kind, len(succeeded)))
 	}
 	if len(failed) > 0 {
-		fmt.Fprintf(e.errOut, "\nFailed to %s:\n", describe(kind, len(failed)))
-		for _, f := range failed {
-			fmt.Fprintf(e.errOut, "  %s: %s: %v\n", f.Notification.Repo, f.Notification.Title, f.Err)
-		}
+		reportFailed(e.errOut, "", kind, failed)
 		return fmt.Errorf("%d of %d failed", len(failed), len(sel.matched))
 	}
 	return nil
+}
+
+// runCleanRules is clean with rules from the rules file instead of filters.
+func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions) error {
+	switch {
+	case !opts.filters.IsEmpty() || opts.actionSet || opts.all:
+		return errors.New("rules can't be combined with filters, --action or --all")
+	case opts.concurrency < 1:
+		return errors.New("--concurrency must be at least 1")
+	}
+	rules, err := opts.rules.load(e)
+	if err != nil {
+		return err
+	}
+
+	c, err := root.client(e)
+	if err != nil {
+		return err
+	}
+	done, err := root.openCache(e)
+	if err != nil {
+		return err
+	}
+	p := progress{e.errOut, e.showProgress}
+	sels, err := selectEach(ctx, c, ruleFilters(rules), done, e.now(), false, p)
+	if err != nil {
+		return err
+	}
+	defer reportUnreadable(e.errOut, unreadableOf(sels))
+
+	if !opts.apply {
+		for i, r := range rules {
+			if i > 0 {
+				fmt.Fprintln(e.out)
+			}
+			matched := sels[i].matched
+			if len(matched) == 0 {
+				fmt.Fprintf(e.out, "Rule %q: No notifications match.\n", r.name)
+				continue
+			}
+			fmt.Fprintf(e.out, "Rule %q: Would %s.\n\n", r.name, describe(r.kind, len(matched)))
+			if err := render.Summary(e.out, matched); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintln(e.out, "\nRun again with --apply to do it.")
+		return nil
+	}
+
+	var allDone []inbox.Notification
+	var failures, total int
+	for i, r := range rules {
+		matched := sels[i].matched
+		if len(matched) == 0 {
+			fmt.Fprintf(e.out, "Rule %q: No notifications match.\n", r.name)
+			continue
+		}
+		succeeded, failed := applyAction(ctx, c, r.kind, matched, opts.concurrency, p)
+		if r.kind == action.Done {
+			allDone = append(allDone, succeeded...)
+		}
+		if len(succeeded) > 0 {
+			fmt.Fprintf(e.out, "Rule %q: %s.\n", r.name, describePast(r.kind, len(succeeded)))
+		}
+		if len(failed) > 0 {
+			reportFailed(e.errOut, fmt.Sprintf("Rule %q: ", r.name), r.kind, failed)
+		}
+		failures += len(failed)
+		total += len(matched)
+	}
+	if done != nil && len(allDone) > 0 {
+		if err := recordDone(done, allDone, sels[0].listed); err != nil {
+			fmt.Fprintf(e.errOut, "warning: saving the record of notifications marked as done: %v\n", err)
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d of %d failed", failures, total)
+	}
+	return nil
+}
+
+// applyAction applies the action to the notifications.
+func applyAction(ctx context.Context, c client, kind action.Kind, notifications []inbox.Notification, concurrency int, p progress) (succeeded []inbox.Notification, failed []action.Failure) {
+	runner := action.Runner{
+		Client:      c,
+		Kind:        kind,
+		Concurrency: concurrency,
+		Progress: func(finished, total int) {
+			p.show("%d/%d", finished, total)
+		},
+	}
+	succeeded, failed = runner.Run(ctx, notifications)
+	p.clear()
+	return succeeded, failed
+}
+
+// reportFailed lists the notifications the action failed on, after a
+// heading that starts with prefix.
+func reportFailed(w io.Writer, prefix string, kind action.Kind, failed []action.Failure) {
+	fmt.Fprintf(w, "\n%sFailed to %s:\n", prefix, describe(kind, len(failed)))
+	for _, f := range failed {
+		fmt.Fprintf(w, "  %s: %s: %v\n", f.Notification.Repo, f.Notification.Title, f.Err)
+	}
 }
 
 // recordDone adds the threads marked as done to the record, and forgets the

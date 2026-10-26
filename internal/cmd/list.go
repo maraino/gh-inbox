@@ -16,6 +16,7 @@ type listOptions struct {
 	summary bool
 	json    bool
 	limit   int
+	rules   ruleFlags
 }
 
 func newListCmd(root *rootOptions, e *env) *cobra.Command {
@@ -25,6 +26,9 @@ func newListCmd(root *rootOptions, e *env) *cobra.Command {
 		Short: "List the notifications that match the filters",
 		Long: `List the notifications in your inbox that match the filters, most recently
 updated first. Without filters, it lists them all.
+
+--rule lists the notifications that rules from the rules file would act on,
+and --rules those of every rule. See "gh inbox clean --help" for the rules.
 ` + filterHelp,
 		Example: `  # How many notifications there are, by repository, type, reason and state
   gh inbox list --summary
@@ -33,7 +37,10 @@ updated first. Without filters, it lists them all.
   gh inbox list --state open --review-requested @me
 
   # CI notifications older than a week, as JSON
-  gh inbox list --type ci --older-than 7d --json`,
+  gh inbox list --type ci --older-than 7d --json
+
+  # What the rule old-subscribed would clean
+  gh inbox list --rule old-subscribed`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runList(cmd.Context(), root, e, opts)
@@ -45,6 +52,8 @@ updated first. Without filters, it lists them all.
 	flags.BoolVar(&opts.summary, "summary", false, "Show counts by repository, type, reason and state")
 	flags.BoolVar(&opts.json, "json", false, "Write the notifications as JSON")
 	flags.IntVar(&opts.limit, "limit", 0, "Show at most `n` notifications (default: all)")
+	opts.rules.add(flags, "List what the rule `name` from the rules file acts on, instead of filters",
+		"List what every rule in the rules file acts on")
 	cmd.MarkFlagsMutuallyExclusive("summary", "json")
 	return cmd
 }
@@ -53,6 +62,18 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 	if opts.limit < 0 {
 		return errors.New("--limit can't be negative")
 	}
+	filters := []*filter.Options{&opts.filters}
+	if opts.rules.given() {
+		if !opts.filters.IsEmpty() {
+			return errors.New("rules can't be combined with filters")
+		}
+		rules, err := opts.rules.load(e)
+		if err != nil {
+			return err
+		}
+		filters = ruleFilters(rules)
+	}
+
 	c, err := root.client(e)
 	if err != nil {
 		return err
@@ -64,10 +85,11 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 
 	p := progress{e.errOut, e.showProgress}
 	// Only the JSON shows the teams whose review is requested.
-	sel, err := selectNotifications(ctx, c, &opts.filters, done, e.now(), opts.json, p)
+	sels, err := selectEach(ctx, c, filters, done, e.now(), opts.json, p)
 	if err != nil {
 		return err
 	}
+	sel := merge(sels)
 	matched := sel.matched
 	if opts.limit > 0 && len(matched) > opts.limit {
 		matched = matched[:opts.limit]
