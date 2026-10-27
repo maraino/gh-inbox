@@ -97,12 +97,8 @@ func keyIn(b []byte) (byte, bool) {
 }
 
 func (k *keyReader) ReadKey(ctx context.Context) (byte, error) {
-	for drained := false; !drained; {
-		select {
-		case <-k.keys:
-		default:
-			drained = true
-		}
+	for len(k.keys) > 0 {
+		<-k.keys
 	}
 	select {
 	case key := <-k.keys:

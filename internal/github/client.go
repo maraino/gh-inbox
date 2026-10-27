@@ -26,6 +26,9 @@ type Options struct {
 	// CacheDir, when set, is where the list of notifications and the
 	// details of pull requests and issues are kept between runs.
 	CacheDir string
+	// RefreshCache, with CacheDir, ignores what's cached but still caches
+	// the new responses.
+	RefreshCache bool
 
 	// AuthToken and Transport replace gh's token and the default HTTP
 	// transport. They are meant for tests.
@@ -40,6 +43,7 @@ type Client struct {
 	gql      *api.GraphQLClient
 	log      io.Writer
 	cacheDir string
+	refresh  bool
 	sleep    func(context.Context, time.Duration) error
 	now      func() time.Time
 }
@@ -68,23 +72,33 @@ func New(opts Options) (*Client, error) {
 	}
 	return &Client{
 		opts: clientOpts, rest: rest, gql: gql, log: opts.Log, cacheDir: opts.CacheDir,
-		sleep: sleep, now: time.Now,
+		refresh: opts.RefreshCache, sleep: sleep, now: time.Now,
 	}, nil
 }
 
 // MarkDone marks a thread as done, which removes it from the inbox.
 func (c *Client) MarkDone(ctx context.Context, threadID string) error {
-	return c.send(ctx, http.MethodDelete, "notifications/threads/"+url.PathEscape(threadID))
+	return c.changeThread(ctx, http.MethodDelete, threadID, "")
 }
 
 // MarkRead marks a thread as read.
 func (c *Client) MarkRead(ctx context.Context, threadID string) error {
-	return c.send(ctx, http.MethodPatch, "notifications/threads/"+url.PathEscape(threadID))
+	return c.changeThread(ctx, http.MethodPatch, threadID, "")
 }
 
 // Unsubscribe mutes a thread until you comment on it or are mentioned.
 func (c *Client) Unsubscribe(ctx context.Context, threadID string) error {
-	return c.send(ctx, http.MethodDelete, "notifications/threads/"+url.PathEscape(threadID)+"/subscription")
+	return c.changeThread(ctx, http.MethodDelete, threadID, "/subscription")
+}
+
+// changeThread sends a request that changes a thread, which makes the cached
+// list of notifications out of date.
+func (c *Client) changeThread(ctx context.Context, method, threadID, suffix string) error {
+	err := c.send(ctx, method, "notifications/threads/"+url.PathEscape(threadID)+suffix)
+	if err == nil {
+		c.forgetList()
+	}
+	return err
 }
 
 // Unwatch stops watching a repository, given as "owner/name". Threads you
@@ -97,10 +111,9 @@ func (c *Client) Unwatch(ctx context.Context, repo string) error {
 	return c.send(ctx, http.MethodDelete, "repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name)+"/subscription")
 }
 
-// send makes a request without a body and discards the response. A change
-// to a thread makes the cached list of notifications out of date.
+// send makes a request without a body and discards the response.
 func (c *Client) send(ctx context.Context, method, path string) error {
-	err := c.retry(ctx, func() error {
+	return c.retry(ctx, func() error {
 		resp, err := c.rest.RequestWithContext(ctx, method, path, nil)
 		if err != nil {
 			return err
@@ -111,10 +124,6 @@ func (c *Client) send(ctx context.Context, method, path string) error {
 		}
 		return nil
 	})
-	if err == nil && strings.HasPrefix(path, "notifications/") {
-		c.forgetList()
-	}
-	return err
 }
 
 // get decodes the response of a REST endpoint into v. For paginated

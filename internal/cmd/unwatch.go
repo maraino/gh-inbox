@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/maraino/gh-inbox/internal/filter"
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
 
@@ -81,31 +82,23 @@ func runUnwatch(ctx context.Context, root *rootOptions, e *env, opts *unwatchOpt
 	if err != nil {
 		return err
 	}
-	p := progress{e.errOut, e.showProgress}
-	p.show("Listing notifications…")
-	listed, err := c.Notifications(ctx)
-	p.clear()
+	sel, err := selectNotifications(ctx, c, &filter.Options{Reasons: []string{reasonWatching}}, done, e.now(), false,
+		progress{e.errOut, e.showProgress})
 	if err != nil {
-		return fmt.Errorf("listing notifications: %w", err)
+		return err
 	}
-	var inInbox []inbox.Notification
-	for _, n := range listed {
-		if done == nil || !done.IsDone(n.ID, n.UpdatedAt) {
-			inInbox = append(inInbox, n)
-		}
-	}
-	repos := watchedRepos(inInbox)
+	repos := watchedRepos(sel.matched)
 
 	if len(args) == 0 {
 		if len(repos) == 0 {
 			fmt.Fprintln(e.errOut, "No notifications come from repositories you watch.")
 			return nil
 		}
-		verb := "come"
-		if total(repos) == 1 {
+		n, verb := total(repos), "come"
+		if n == 1 {
 			verb = "comes"
 		}
-		fmt.Fprintf(e.out, "%s %s from %s you watch:\n\n", notifications(total(repos)), verb, repositories(len(repos)))
+		fmt.Fprintf(e.out, "%s %s from %s you watch:\n\n", notifications(n), verb, repositories(len(repos)))
 		if err := writeWatched(e.out, repos); err != nil {
 			return err
 		}

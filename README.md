@@ -213,7 +213,8 @@ in `~/.cache/gh-inbox/<host>` (or under `$XDG_CACHE_HOME`):
   reused for up to an hour while its notification has no new activity. Some
   changes, such as new labels, don't count as activity.
 
-`--no-cache` ignores the cache, as well as the record of done notifications.
+`--no-cache` ignores the cache, as well as the record of done notifications;
+the responses it gets still renew the cache.
 
 ### Other flags
 
