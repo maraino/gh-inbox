@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/maraino/gh-inbox/internal/cache"
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
 
@@ -94,16 +95,13 @@ func (c *Client) forgetList() {
 // readDetails returns the cached details that can still be used.
 func (c *Client) readDetails() map[string]cachedSubject {
 	var dc detailsCache
-	if !c.readCache(detailsCacheFile, &dc) || dc.Version != cacheVersion {
+	if !c.readCache(detailsCacheFile, &dc) || dc.Version != cacheVersion || dc.Subjects == nil {
 		return map[string]cachedSubject{}
 	}
 	for url, s := range dc.Subjects {
 		if c.now().Sub(s.FetchedAt) > detailsMaxAge {
 			delete(dc.Subjects, url)
 		}
-	}
-	if dc.Subjects == nil {
-		return map[string]cachedSubject{}
 	}
 	return dc.Subjects
 }
@@ -114,7 +112,7 @@ func (c *Client) writeDetails(subjects map[string]cachedSubject) {
 
 // readCache decodes a cache file into v. It reports whether it could.
 func (c *Client) readCache(name string, v any) bool {
-	if c.cacheDir == "" {
+	if c.cacheDir == "" || c.refresh {
 		return false
 	}
 	data, err := os.ReadFile(filepath.Join(c.cacheDir, name))
@@ -136,30 +134,11 @@ func (c *Client) writeCache(name string, v any) {
 	if c.cacheDir == "" {
 		return
 	}
-	if err := writeFileAtomic(filepath.Join(c.cacheDir, name), v); err != nil {
+	data, err := json.Marshal(v)
+	if err == nil {
+		err = cache.WriteFileAtomic(filepath.Join(c.cacheDir, name), data)
+	}
+	if err != nil {
 		c.logf("* Not caching %s: %v", name, err)
 	}
-}
-
-func writeFileAtomic(path string, v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".cache-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

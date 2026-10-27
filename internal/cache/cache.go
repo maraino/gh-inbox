@@ -38,15 +38,21 @@ type file struct {
 // $XDG_STATE_HOME/gh-inbox/HOST/done.json, or
 // ~/.local/state/gh-inbox/HOST/done.json.
 func DefaultPath(host string) (string, error) {
-	dir := os.Getenv("XDG_STATE_HOME")
+	return XDGPath("XDG_STATE_HOME", filepath.Join(".local", "state"), "gh-inbox", host, "done.json")
+}
+
+// XDGPath joins elem to the directory in the environment variable xdgVar,
+// or to fallback under the home directory when it isn't set.
+func XDGPath(xdgVar, fallback string, elem ...string) (string, error) {
+	dir := os.Getenv(xdgVar)
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		dir = filepath.Join(home, ".local", "state")
+		dir = filepath.Join(home, fallback)
 	}
-	return filepath.Join(dir, "gh-inbox", host, "done.json"), nil
+	return filepath.Join(append([]string{dir}, elem...)...), nil
 }
 
 // Open reads the record at path. A missing file is an empty record.
@@ -103,10 +109,16 @@ func (s *Store) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	return WriteFileAtomic(s.path, data)
+}
+
+// WriteFileAtomic replaces the file at path with data, creating its
+// directory if needed. A failed write leaves the previous file intact.
+func WriteFileAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".done-*.json")
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
@@ -118,5 +130,5 @@ func (s *Store) Save() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.path)
+	return os.Rename(tmp.Name(), path)
 }

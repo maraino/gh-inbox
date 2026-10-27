@@ -113,7 +113,7 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 		return fmt.Errorf("reading keys from the terminal: %w", err)
 	}
 	defer kb.Close()
-	out := kb.Out(e.out)
+	out, errOut := kb.Out(e.out), kb.Out(e.errOut)
 
 	// handled is the last action applied to each notification; counts and
 	// markedDone count every one, including those applied again after
@@ -124,7 +124,7 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 	defer func() {
 		if done != nil && len(markedDone) > 0 {
 			if err := recordDone(done, markedDone, sel.listed); err != nil {
-				fmt.Fprintf(out, "warning: saving the record of notifications marked as done: %v\n", err)
+				fmt.Fprintf(errOut, "warning: saving the record of notifications marked as done: %v\n", err)
 			}
 		}
 		fmt.Fprintln(out)
@@ -142,7 +142,7 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 		if untouched > 0 {
 			fmt.Fprintf(out, "Left %s untouched.\n", notifications(untouched))
 		}
-		reportUnreadable(out, sel.unreadable)
+		reportUnreadable(errOut, sel.unreadable)
 	}()
 
 	for i := 0; i < len(matched); {

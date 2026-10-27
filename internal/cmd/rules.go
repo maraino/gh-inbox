@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/maraino/gh-inbox/internal/action"
+	"github.com/maraino/gh-inbox/internal/cache"
 	"github.com/maraino/gh-inbox/internal/filter"
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
@@ -43,15 +43,7 @@ type ruleEntry struct {
 // defaultRulesPath returns where the rules are kept:
 // $XDG_CONFIG_HOME/gh-inbox/rules.yml, or ~/.config/gh-inbox/rules.yml.
 func defaultRulesPath() (string, error) {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "gh-inbox", "rules.yml"), nil
+	return cache.XDGPath("XDG_CONFIG_HOME", ".config", "gh-inbox", "rules.yml")
 }
 
 // loadRules reads the rules file at path.

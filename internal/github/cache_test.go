@@ -78,6 +78,22 @@ func TestNotificationsCache(t *testing.T) {
 	if conditional.Load() != 1 || requests.Load() != 4 {
 		t.Errorf("listing with an old cache made %d conditional requests of %d, want 1 of 4", conditional.Load(), requests.Load())
 	}
+
+	// Refreshing ignores the cached list, but still forgets it after a
+	// change, so that a later run doesn't reuse it.
+	c.refresh = true
+	list()
+	if conditional.Load() != 1 {
+		t.Errorf("listing while refreshing made a conditional request")
+	}
+	if err := c.MarkRead(t.Context(), "1"); err != nil {
+		t.Fatal(err)
+	}
+	c.refresh = false
+	list()
+	if conditional.Load() != 1 {
+		t.Errorf("listing after a change made while refreshing made a conditional request")
+	}
 }
 
 func TestNotificationsCacheUnreadable(t *testing.T) {
