@@ -130,8 +130,18 @@ func hintUnwatch(e *env, matched []inbox.Notification) {
 	if !e.showProgress {
 		return
 	}
-	if n := total(watchedRepos(matched)); n > 0 {
-		fmt.Fprintf(e.errOut, "\n%s, with reason %q, are from repositories you watch. \"gh inbox unwatch\" shows which ones.\n",
-			notifications(n), reasonWatching)
+	n := 0
+	for _, m := range matched {
+		if m.Reason == reasonWatching {
+			n++
+		}
+	}
+	if n > 0 {
+		verb := "are"
+		if n == 1 {
+			verb = "is"
+		}
+		fmt.Fprintf(e.errOut, "\n%s, with reason %q, %s from repositories you watch. \"gh inbox unwatch\" shows which ones.\n",
+			notifications(n), reasonWatching, verb)
 	}
 }

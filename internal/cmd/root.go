@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -150,9 +149,12 @@ func (o *rootOptions) client(e *env) (client, error) {
 	if o.verbose {
 		opts.Log = e.errOut
 	}
-	if !o.noCache && e.cacheDir != nil {
+	if e.cacheDir != nil {
 		// Without a cache directory, nothing is cached.
 		opts.CacheDir, _ = e.cacheDir(opts.Host)
+		// --no-cache doesn't read the cache, but still renews it, so that
+		// the changes made now don't leave an out-of-date list behind.
+		opts.RefreshCache = o.noCache
 	}
 	return e.newClient(opts)
 }
@@ -160,15 +162,7 @@ func (o *rootOptions) client(e *env) (client, error) {
 // defaultCacheDir returns where API responses for a host are cached:
 // $XDG_CACHE_HOME/gh-inbox/HOST, or ~/.cache/gh-inbox/HOST.
 func defaultCacheDir(host string) (string, error) {
-	dir := os.Getenv("XDG_CACHE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(dir, "gh-inbox", host), nil
+	return cache.XDGPath("XDG_CACHE_HOME", ".cache", "gh-inbox", host)
 }
 
 // repoPages are the repository pages that list subjects of each type

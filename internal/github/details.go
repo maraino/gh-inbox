@@ -145,6 +145,7 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 	details := make(map[string]*inbox.Subject)
 	var refs []subjectRef
 	seen := make(map[string]bool)
+	cached := 0
 	for _, n := range notifications {
 		if !n.Type.HasDetails() || seen[n.SubjectURL] {
 			continue
@@ -154,6 +155,7 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 			if s.Subject != nil {
 				details[n.SubjectURL] = s.Subject
 			}
+			cached++
 			continue
 		}
 		if ref, ok := parseSubjectRef(n.SubjectURL); ok {
@@ -163,7 +165,7 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 	if len(refs) == 0 {
 		return details, nil
 	}
-	if cached := len(seen) - len(refs); cached > 0 {
+	if cached > 0 {
 		c.logf("* Using the cached details of %d pull requests and issues", cached)
 	}
 
