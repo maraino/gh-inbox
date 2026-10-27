@@ -121,9 +121,12 @@ type Notification struct {
 type Subject struct {
 	Number int
 	State  State
+	// Draft reports whether a pull request is a draft.
+	Draft bool
 	// URL is the web URL of the pull request or issue.
 	URL       string
 	Author    string
+	Labels    []string
 	Assignees []string
 	// ReviewUsers are the users whose review is currently requested.
 	ReviewUsers []string

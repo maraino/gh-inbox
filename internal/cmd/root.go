@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"github.com/cli/go-gh/v2/pkg/browser"
 	"github.com/cli/go-gh/v2/pkg/term"
 	"github.com/spf13/cobra"
-	xterm "golang.org/x/term"
 
 	"github.com/maraino/gh-inbox/internal/action"
 	"github.com/maraino/gh-inbox/internal/cache"
@@ -32,6 +32,7 @@ type client interface {
 	Notifications(ctx context.Context) ([]inbox.Notification, error)
 	SubjectDetails(ctx context.Context, notifications []inbox.Notification, opts github.DetailsOptions) (map[string]*inbox.Subject, error)
 	Viewer(ctx context.Context) (inbox.Identity, error)
+	Unwatch(ctx context.Context, repo string) error
 	action.Client
 }
 
@@ -49,11 +50,13 @@ type env struct {
 	now          func() time.Time
 	newClient    func(github.Options) (client, error)
 	cachePath    func(host string) (string, error)
+	// cacheDir returns where API responses for a host are cached.
+	cacheDir func(host string) (string, error)
 	// rulesPath returns where the rules file is.
 	rulesPath func() (string, error)
-	// readKey reads a key press from the terminal. It's nil when stdin or
-	// stdout isn't a terminal.
-	readKey func() (byte, error)
+	// openKeyboard starts reading key presses from the terminal; Ctrl-C
+	// calls interrupt. It's nil when stdin or stdout isn't a terminal.
+	openKeyboard func(interrupt func()) (keyboard, error)
 	// openBrowser opens a URL in the web browser.
 	openBrowser func(url string) error
 }
@@ -64,9 +67,9 @@ func defaultEnv() *env {
 	if err != nil {
 		width = 80
 	}
-	var readKey func() (byte, error)
+	var openKeyboard func(func()) (keyboard, error)
 	if term.IsTerminal(os.Stdin) && t.IsTerminalOutput() {
-		readKey = readTerminalKey
+		openKeyboard = openTerminalKeyboard
 	}
 	return &env{
 		out:          t.Out(),
@@ -77,28 +80,13 @@ func defaultEnv() *env {
 		now:          time.Now,
 		newClient:    func(opts github.Options) (client, error) { return github.New(opts) },
 		cachePath:    cache.DefaultPath,
+		cacheDir:     defaultCacheDir,
 		rulesPath:    defaultRulesPath,
-		readKey:      readKey,
+		openKeyboard: openKeyboard,
 		// Finding the browser reads the gh configuration, so only do it
 		// when one is opened.
 		openBrowser: func(url string) error { return browser.New("", t.Out(), t.ErrOut()).Browse(url) },
 	}
-}
-
-// readTerminalKey reads a key press from stdin, a terminal, without waiting
-// for Enter.
-func readTerminalKey() (byte, error) {
-	fd := int(os.Stdin.Fd())
-	state, err := xterm.MakeRaw(fd)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = xterm.Restore(fd, state) }() // Nothing to do if it fails.
-	var b [1]byte
-	if _, err := os.Stdin.Read(b[:]); err != nil {
-		return 0, err
-	}
-	return b[0], nil
 }
 
 // rootOptions are the flags shared by every command.
@@ -117,7 +105,8 @@ func newRootCmd(e *env) *cobra.Command {
 
 Use "gh inbox list" to see which notifications match a set of filters, and
 "gh inbox clean" to mark them as done, mark them as read, or unsubscribe from
-them. "gh inbox triage" goes through them one at a time.`,
+them. "gh inbox triage" goes through them one at a time. "gh inbox unwatch"
+stops watching the repositories that fill the inbox.`,
 		Annotations: map[string]string{
 			cobra.CommandDisplayNameAnnotation: "gh inbox",
 		},
@@ -130,10 +119,11 @@ them. "gh inbox triage" goes through them one at a time.`,
 
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&opts.hostname, "hostname", "", "GitHub `host` to use (default: the gh default host)")
-	flags.BoolVar(&opts.noCache, "no-cache", false, "Ignore the local record of notifications already marked as done")
+	flags.BoolVar(&opts.noCache, "no-cache", false,
+		"Ignore the local record of notifications already marked as done, and cached API responses")
 	flags.BoolVar(&opts.verbose, "verbose", false, "Log API requests and retries to stderr")
 
-	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e), newTriageCmd(opts, e))
+	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e), newTriageCmd(opts, e), newUnwatchCmd(opts, e))
 	return cmd
 }
 
@@ -160,7 +150,25 @@ func (o *rootOptions) client(e *env) (client, error) {
 	if o.verbose {
 		opts.Log = e.errOut
 	}
+	if !o.noCache && e.cacheDir != nil {
+		// Without a cache directory, nothing is cached.
+		opts.CacheDir, _ = e.cacheDir(opts.Host)
+	}
 	return e.newClient(opts)
+}
+
+// defaultCacheDir returns where API responses for a host are cached:
+// $XDG_CACHE_HOME/gh-inbox/HOST, or ~/.cache/gh-inbox/HOST.
+func defaultCacheDir(host string) (string, error) {
+	dir := os.Getenv("XDG_CACHE_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".cache")
+	}
+	return filepath.Join(dir, "gh-inbox", host), nil
 }
 
 // repoPages are the repository pages that list subjects of each type

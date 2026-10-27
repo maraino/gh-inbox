@@ -63,7 +63,7 @@ func TestParseRulesErrors(t *testing.T) {
 		{"same name", "rules:\n  - name: a\n    filters: {type: ci}\n  - name: a\n    filters: {type: pr}\n", `rule "a" appears twice`},
 		{"unknown action", "rules:\n  - name: a\n    action: delete\n    filters: {type: ci}\n", `rule "a"`},
 		{"no filters", "rules:\n  - name: a\n", "no filters"},
-		{"unknown filter", "rules:\n  - name: a\n    filters: {label: bug}\n", `unknown filter "label"`},
+		{"unknown filter", "rules:\n  - name: a\n    filters: {color: red}\n", `unknown filter "color"`},
 		{"no value", "rules:\n  - name: a\n    filters: {type: }\n", "filter type: no value"},
 		{"map value", "rules:\n  - name: a\n    filters: {type: {a: b}}\n", "filter type: want a value"},
 		{"invalid age", "rules:\n  - name: a\n    filters: {older-than: soon}\n", "filter older-than"},

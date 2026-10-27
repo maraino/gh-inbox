@@ -25,13 +25,14 @@ var notifications = map[string]inbox.Notification{
 		Repo: "acme/web", Type: inbox.TypePullRequest, Reason: "team_mention",
 		UpdatedAt: now.Add(-time.Hour),
 		Subject: &inbox.Subject{
-			State: inbox.StateOpen, Author: "bob", ReviewTeams: []string{"acme/backend"},
+			State: inbox.StateOpen, Draft: true, Author: "bob", ReviewTeams: []string{"acme/backend"},
+			Labels: []string{"Bug", "backend"},
 		},
 	},
 	"closed issue": {
 		Repo: "other/tool", Type: inbox.TypeIssue, Reason: "subscribed",
 		UpdatedAt: now.Add(-30 * 24 * time.Hour),
-		Subject:   &inbox.Subject{State: inbox.StateClosed, Author: "me"},
+		Subject:   &inbox.Subject{State: inbox.StateClosed, Author: "me", Labels: []string{"docs"}},
 	},
 	"unreadable pr": {
 		Repo: "acme/gone", Type: inbox.TypePullRequest, Reason: "review_requested",
@@ -76,6 +77,26 @@ func TestMatch(t *testing.T) {
 		{
 			name: "state skips subjects without details",
 			opts: Options{States: []string{"merged", "closed"}},
+			want: []string{"merged pr for me", "closed issue"},
+		},
+		{
+			name: "draft",
+			opts: Options{Draft: true},
+			want: []string{"open pr for my team"},
+		},
+		{
+			name: "not draft",
+			opts: Options{NotDraft: true},
+			want: []string{"merged pr for me", "closed issue"},
+		},
+		{
+			name: "labels are ORed and case-insensitive",
+			opts: Options{Labels: []string{"bug", "docs"}},
+			want: []string{"open pr for my team", "closed issue"},
+		},
+		{
+			name: "not label",
+			opts: Options{NotLabels: []string{"BACKEND"}},
 			want: []string{"merged pr for me", "closed issue"},
 		},
 		{
@@ -246,6 +267,8 @@ func TestNewErrors(t *testing.T) {
 		{name: "unknown reason", opts: Options{Reasons: []string{"review-requested"}}},
 		{name: "unknown state", opts: Options{States: []string{"draft"}}},
 		{name: "read and unread", opts: Options{Read: true, Unread: true}},
+		{name: "draft and not draft", opts: Options{Draft: true, NotDraft: true}},
+		{name: "empty label", opts: Options{Labels: []string{" "}}},
 		{name: "negative age", opts: Options{OlderThan: -time.Hour}},
 		{name: "negative newer age", opts: Options{NewerThan: -time.Hour}},
 		{name: "ages that don't overlap", opts: Options{OlderThan: 7 * 24 * time.Hour, NewerThan: 24 * time.Hour}},
