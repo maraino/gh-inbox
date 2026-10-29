@@ -144,6 +144,24 @@ func runEnv(t *testing.T, c *fakeClient, cacheDir string, change func(*env), arg
 	return result{stdout: stdout.String(), stderr: stderr.String(), err: err}
 }
 
+// fakeRows are the rows "gh inbox list" writes for the notifications of
+// newFakeInbox, by ID.
+var fakeRows = map[int]string{
+	1: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
+	2: "acme/web\t#2\tpr\topen\treview_requested\t2026-10-20T10:00:00Z\tOpen feature\n",
+	3: "acme/api\t-\tci\t-\tci_activity\t2026-10-10T12:00:00Z\tCI failed\n",
+	4: "acme/gone\t#4\tpr\t-\treview_requested\t2026-10-20T09:00:00Z\tLost PR\n",
+}
+
+// rows returns the rows of the notifications with the IDs, in order.
+func rows(ids ...int) string {
+	var b strings.Builder
+	for _, id := range ids {
+		b.WriteString(fakeRows[id])
+	}
+	return b.String()
+}
+
 func TestList(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -185,6 +203,36 @@ func TestList(t *testing.T) {
 			name:       "limit",
 			args:       []string{"list", "--limit", "1"},
 			wantStdout: "acme/api\t#1\tpr\tmerged\treview_requested\t2026-10-20T11:00:00Z\tMerged fix\n",
+		},
+		{
+			name:       "sort by repository",
+			args:       []string{"list", "--sort", "repo"},
+			wantStdout: rows(1, 3, 4, 2),
+		},
+		{
+			name:       "sort by state, then the most recently updated",
+			args:       []string{"list", "--sort", "state"},
+			wantStdout: rows(2, 1, 4, 3),
+		},
+		{
+			name:       "sort by several keys",
+			args:       []string{"list", "--sort", "type,REPO"},
+			wantStdout: rows(3, 1, 4, 2),
+		},
+		{
+			name:       "sort the least recently updated first",
+			args:       []string{"list", "--sort", "updated", "--reverse"},
+			wantStdout: rows(3, 4, 2, 1),
+		},
+		{
+			name:       "reverse the order of the inbox",
+			args:       []string{"list", "--reverse"},
+			wantStdout: rows(4, 3, 2, 1),
+		},
+		{
+			name:       "sort before the limit",
+			args:       []string{"list", "--sort", "state", "--limit", "1"},
+			wantStdout: rows(2),
 		},
 		{
 			name:       "nothing matches",
@@ -268,6 +316,9 @@ func TestListErrors(t *testing.T) {
 		{"list", "--limit", "-1"},
 		{"list", "--assigned-to", "acme/backend"},
 		{"list", "extra"},
+		{"list", "--sort", "number"},
+		{"list", "--summary", "--sort", "repo"},
+		{"list", "--summary", "--reverse"},
 	} {
 		if got := run(t, newFakeInbox(), t.TempDir(), args...); got.err == nil {
 			t.Errorf("%v succeeded, want an error", args)

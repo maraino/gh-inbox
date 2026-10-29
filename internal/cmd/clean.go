@@ -23,6 +23,7 @@ type cleanOptions struct {
 	list        bool
 	concurrency int
 	rules       ruleFlags
+	sort        sortFlags
 	// actionSet reports whether --action was given.
 	actionSet bool
 }
@@ -90,6 +91,12 @@ first rule it matches. A rule must have filters.
   gh inbox clean --rule merged,stale-ci --apply`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if opts.sort.given() && !opts.list {
+				return errors.New("--sort and --reverse order the notifications --list shows: add --list")
+			}
+			if err := opts.sort.check(); err != nil {
+				return err
+			}
 			opts.actionSet = cmd.Flags().Changed("action")
 			if opts.rules.given() {
 				return runCleanRules(cmd.Context(), root, e, opts)
@@ -104,6 +111,7 @@ first rule it matches. A rule must have filters.
 	flags.BoolVar(&opts.apply, "apply", false, "Apply the action; without it, only show what it would do")
 	flags.BoolVar(&opts.all, "all", false, "Allow cleaning without filters, which acts on every notification")
 	flags.BoolVar(&opts.list, "list", false, "List each notification, as \"gh inbox list\" does, instead of a summary")
+	opts.sort.add(flags)
 	flags.IntVar(&opts.concurrency, "concurrency", 4, "How many requests to make at the same time")
 	opts.rules.add(flags, "Apply the rule `name` from the rules file, instead of filters",
 		"Apply every rule in the rules file")
@@ -140,6 +148,9 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 	if len(sel.matched) == 0 {
 		fmt.Fprintln(e.errOut, "No notifications match.")
 		return nil
+	}
+	if err := opts.lookUpListed(ctx, c, []*selection{sel}, p); err != nil {
+		return err
 	}
 	if !opts.apply {
 		fmt.Fprintf(e.out, "Would %s.\n\n", describe(kind, len(sel.matched)))
@@ -200,6 +211,9 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 		return err
 	}
 	defer reportUnreadable(e.errOut, unreadableOf(sels))
+	if err := opts.lookUpListed(ctx, c, sels, p); err != nil {
+		return err
+	}
 
 	if !opts.apply {
 		for i, r := range rules {
@@ -257,10 +271,35 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 	return nil
 }
 
-// show writes the notifications clean would act on: each one with --list,
-// and a summary otherwise.
+// lookUpListed looks up the details of the pull requests and issues that
+// --list shows, when the filters didn't need them.
+func (o *cleanOptions) lookUpListed(ctx context.Context, c client, sels []*selection, p progress) error {
+	if !o.list || sels[0].detailed {
+		return nil
+	}
+	var matched []inbox.Notification
+	for _, sel := range sels {
+		matched = append(matched, sel.matched...)
+	}
+	if len(matched) == 0 {
+		return nil
+	}
+	err := lookUpDetails(ctx, c, matched, false, false, p)
+	p.clear()
+	if err != nil {
+		return err
+	}
+	for _, sel := range sels {
+		matched = matched[copy(sel.matched, matched):]
+	}
+	return nil
+}
+
+// show writes the notifications clean would act on: each one, in the order
+// --sort gives, with --list, and a summary otherwise.
 func (o *cleanOptions) show(e *env, notifications []inbox.Notification) error {
 	if o.list {
+		o.sort.sort(notifications)
 		return render.Table(e.out, notifications, e.isTTY, e.width, e.now())
 	}
 	return render.Summary(e.out, notifications)
@@ -274,6 +313,7 @@ func (o *cleanOptions) showDone(e *env, prefix string, kind action.Kind, succeed
 		return nil
 	}
 	fmt.Fprintf(e.out, "%s%s:\n\n", prefix, describePast(kind, len(succeeded)))
+	o.sort.sort(succeeded)
 	return render.Table(e.out, succeeded, e.isTTY, e.width, e.now())
 }
 

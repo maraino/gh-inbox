@@ -61,10 +61,10 @@ notifications marked as done is kept per host.
 ## Usage
 
 ```sh
-gh inbox list   [filters | --rule name[,name] | --rules] [--summary | --json] [--limit n]
-gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all] [--list]
-gh inbox clean  --rule name[,name] | --rules [--rules-file file] [--apply] [--list]
-gh inbox triage [filters | --rule name[,name] | --rules]
+gh inbox list   [filters | --rule name[,name] | --rules] [--sort key[,key]] [--reverse] [--limit n] [--json | --summary]
+gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all] [--list [--sort key[,key]] [--reverse]]
+gh inbox clean  --rule name[,name] | --rules [--rules-file file] [--apply] [--list [--sort key[,key]] [--reverse]]
+gh inbox triage [filters | --rule name[,name] | --rules] [--sort key[,key]] [--reverse]
 gh inbox unwatch [owner/name...] [--apply]
 ```
 
@@ -85,6 +85,12 @@ most notifications first; with names or `*` patterns, it shows which ones it
 would stop watching, and does it with `--apply`. Threads you take part in or
 are mentioned in still notify you, and the notifications already in the inbox
 stay until you clean them.
+
+`list`, `triage` and `clean --list` show the most recently updated first.
+`--sort` orders them by `updated` (newest first), `repo`, `type`, `reason` or
+`state` (open, draft, merged, closed, then unknown) instead. With several
+keys, as in `--sort repo,state`, later keys break ties, and the most recently
+updated comes first among the rest. `--reverse` reverses the order.
 
 ### Filters
 

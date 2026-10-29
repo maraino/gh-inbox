@@ -17,6 +17,7 @@ import (
 type triageOptions struct {
 	filters filter.Options
 	rules   ruleFlags
+	sort    sortFlags
 }
 
 func newTriageCmd(root *rootOptions, e *env) *cobra.Command {
@@ -25,7 +26,8 @@ func newTriageCmd(root *rootOptions, e *env) *cobra.Command {
 		Use:   "triage [flags]",
 		Short: "Go through the notifications that match the filters one at a time",
 		Long: `Go through the notifications in your inbox that match the filters one at a
-time, most recently updated first, and handle each with a key:
+time, most recently updated first or in the order --sort gives, and handle
+each with a key:
 
   o  open it in the browser
   d  mark it as done
@@ -43,8 +45,8 @@ Notifications marked as done are added to the record "gh inbox clean" keeps.
 		Example: `  # Pull requests waiting for your review, or your teams'
   gh inbox triage --state open --review-requested @me
 
-  # What's unread in some repositories
-  gh inbox triage --repo 'acme/*' --unread
+  # What's unread in some repositories, one repository at a time
+  gh inbox triage --repo 'acme/*' --unread --sort repo
 
   # What the rule old-subscribed would clean
   gh inbox triage --rule old-subscribed`,
@@ -54,6 +56,7 @@ Notifications marked as done are added to the record "gh inbox clean" keeps.
 		},
 	}
 	addFilterFlags(cmd.Flags(), &opts.filters)
+	opts.sort.add(cmd.Flags())
 	opts.rules.add(cmd.Flags(), "Go through what the rule `name` from the rules file acts on, instead of filters",
 		"Go through what every rule in the rules file acts on")
 	return cmd
@@ -65,6 +68,9 @@ const triagePrompt = "[o]pen [d]one [r]ead [u]nsubscribe [s]kip [p]revious [q]ui
 func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptions) error {
 	if e.openKeyboard == nil {
 		return errors.New(`triage needs a terminal: use "gh inbox list" and "gh inbox clean" in scripts`)
+	}
+	if err := opts.sort.check(); err != nil {
+		return err
 	}
 	filters := []*filter.Options{&opts.filters}
 	if opts.rules.given() {
@@ -104,6 +110,7 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 		fmt.Fprintln(e.errOut, "No notifications match.")
 		return nil
 	}
+	opts.sort.sort(matched)
 
 	// Ctrl-C cancels ctx, which stops a request and quits.
 	ctx, cancel := context.WithCancel(ctx)

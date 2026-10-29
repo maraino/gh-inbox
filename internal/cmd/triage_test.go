@@ -203,3 +203,19 @@ func TestTriageRules(t *testing.T) {
 		t.Errorf("error = %v, want rules and filters refused", got.err)
 	}
 }
+
+func TestTriageSort(t *testing.T) {
+	c := newFakeInbox()
+	var opened []string
+	// Mark as done the first one, which is the CI run when sorted by type.
+	got := runEnv(t, c, t.TempDir(), terminal("dq", &opened), "triage", "--sort", "type")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if want := []string{"done 3"}; !slices.Equal(c.actions, want) {
+		t.Errorf("actions = %v, want %v", c.actions, want)
+	}
+	if want := "(1/4) acme/api · ci · ci_activity"; !strings.Contains(got.stdout, want) {
+		t.Errorf("stdout doesn't contain %q:\n%s", want, got.stdout)
+	}
+}
