@@ -16,7 +16,7 @@ By repository
   132  acme/agent
   …
 
-Run again with --apply to do it, or use "gh inbox list" with the same filters to see each notification.
+Run again with --apply to do it, or add --list to see each notification.
 
 $ gh inbox clean --state merged,closed --apply
 Marked 1835 notifications as done.
@@ -62,8 +62,8 @@ notifications marked as done is kept per host.
 
 ```sh
 gh inbox list   [filters | --rule name[,name] | --rules] [--summary | --json] [--limit n]
-gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all]
-gh inbox clean  --rule name[,name] | --rules [--rules-file file] [--apply]
+gh inbox clean  [filters] [--action done|read|unsubscribe] [--apply] [--all] [--list]
+gh inbox clean  --rule name[,name] | --rules [--rules-file file] [--apply] [--list]
 gh inbox triage [filters | --rule name[,name] | --rules]
 gh inbox unwatch [owner/name...] [--apply]
 ```
@@ -71,6 +71,8 @@ gh inbox unwatch [owner/name...] [--apply]
 `list` shows the notifications that match the filters, most recently updated
 first. `clean` acts on them: it only shows what it would do unless you pass
 `--apply`, and it refuses to act on every notification unless you pass `--all`.
+It shows a summary of the notifications it acts on or, with `--list`, each
+one, as `list` does.
 `triage` goes through them one at a time: press `o` to open one in the
 browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
 `s` to skip it, `p` to go back to the previous one, or `q` to quit. Keys

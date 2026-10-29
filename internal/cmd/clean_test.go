@@ -156,3 +156,69 @@ func TestCleanErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanList(t *testing.T) {
+	merged := "acme/api\t#1\tpr\tmerged\treview_requested\t"
+	open := "acme/web\t#2\tpr\topen\treview_requested\t"
+	tests := []struct {
+		name        string
+		args        []string
+		fail        map[string]bool
+		wantPrefix  string
+		wantRows    []string
+		notWantRows []string
+	}{
+		{
+			name:       "dry run",
+			args:       []string{"--state", "merged,open"},
+			wantPrefix: "Would mark 2 notifications as done.\n\n",
+			wantRows:   []string{merged, open, "\nRun again with --apply to do it.\n"},
+		},
+		{
+			name:        "apply",
+			args:        []string{"--state", "merged,open", "--apply"},
+			fail:        map[string]bool{"2": true},
+			wantPrefix:  "Marked 1 notification as done:\n\n",
+			wantRows:    []string{merged},
+			notWantRows: []string{open},
+		},
+		{
+			name:       "rules dry run",
+			args:       []string{"--rules", "--rules-file", writeRules(t, testRules)},
+			wantPrefix: "Rule \"merged\": Would mark 1 notification as done.\n\n",
+			wantRows:   []string{merged, "Rule \"prs\": Would unsubscribe from 2 notifications.\n\n" + open},
+		},
+		{
+			name:       "rules apply",
+			args:       []string{"--rules", "--rules-file", writeRules(t, testRules), "--apply"},
+			wantPrefix: "Rule \"merged\": Marked 1 notification as done:\n\n" + merged,
+			wantRows:   []string{"\n\nRule \"prs\": Unsubscribed from 2 notifications:\n\n" + open},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newFakeInbox()
+			c.fail = tt.fail
+			got := run(t, c, t.TempDir(), append([]string{"clean", "--list"}, tt.args...)...)
+			if got.err != nil && tt.fail == nil {
+				t.Fatal(got.err)
+			}
+			if !strings.HasPrefix(got.stdout, tt.wantPrefix) {
+				t.Errorf("stdout doesn't start with %q:\n%s", tt.wantPrefix, got.stdout)
+			}
+			for _, want := range tt.wantRows {
+				if !strings.Contains(got.stdout, want) {
+					t.Errorf("stdout doesn't contain %q:\n%s", want, got.stdout)
+				}
+			}
+			for _, row := range tt.notWantRows {
+				if strings.Contains(got.stdout, row) {
+					t.Errorf("stdout contains %q:\n%s", row, got.stdout)
+				}
+			}
+			if strings.Contains(got.stdout, "By repository") {
+				t.Errorf("stdout has a summary:\n%s", got.stdout)
+			}
+		})
+	}
+}

@@ -20,6 +20,7 @@ type cleanOptions struct {
 	action      string
 	apply       bool
 	all         bool
+	list        bool
 	concurrency int
 	rules       ruleFlags
 	// actionSet reports whether --action was given.
@@ -70,8 +71,8 @@ first rule it matches. A rule must have filters.
 		Example: `  # Show what marking merged and closed pull requests as done would do
   gh inbox clean --state merged,closed
 
-  # Do it
-  gh inbox clean --state merged,closed --apply
+  # Do it, and list the notifications marked as done
+  gh inbox clean --state merged,closed --apply --list
 
   # Open pull requests not assigned to you nor awaiting review from you or your teams
   gh inbox clean --type pr --state open --not-involves @me --apply
@@ -102,6 +103,7 @@ first rule it matches. A rule must have filters.
 	flags.StringVar(&opts.action, "action", string(action.Done), "The `action` to apply: done, read or unsubscribe")
 	flags.BoolVar(&opts.apply, "apply", false, "Apply the action; without it, only show what it would do")
 	flags.BoolVar(&opts.all, "all", false, "Allow cleaning without filters, which acts on every notification")
+	flags.BoolVar(&opts.list, "list", false, "List each notification, as \"gh inbox list\" does, instead of a summary")
 	flags.IntVar(&opts.concurrency, "concurrency", 4, "How many requests to make at the same time")
 	opts.rules.add(flags, "Apply the rule `name` from the rules file, instead of filters",
 		"Apply every rule in the rules file")
@@ -141,10 +143,14 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 	}
 	if !opts.apply {
 		fmt.Fprintf(e.out, "Would %s.\n\n", describe(kind, len(sel.matched)))
-		if err := render.Summary(e.out, sel.matched); err != nil {
+		if err := opts.show(e, sel.matched); err != nil {
 			return err
 		}
-		fmt.Fprintln(e.out, "\nRun again with --apply to do it, or use \"gh inbox list\" with the same filters to see each notification.")
+		if opts.list {
+			fmt.Fprintln(e.out, "\nRun again with --apply to do it.")
+		} else {
+			fmt.Fprintln(e.out, "\nRun again with --apply to do it, or add --list to see each notification.")
+		}
 		return nil
 	}
 
@@ -156,7 +162,9 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 	}
 
 	if len(succeeded) > 0 {
-		fmt.Fprintf(e.out, "%s.\n", describePast(kind, len(succeeded)))
+		if err := opts.showDone(e, "", kind, succeeded); err != nil {
+			return err
+		}
 	}
 	if len(failed) > 0 {
 		reportFailed(e.errOut, "", kind, failed)
@@ -204,7 +212,7 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 				continue
 			}
 			fmt.Fprintf(e.out, "Rule %q: Would %s.\n\n", r.name, describe(r.kind, len(matched)))
-			if err := render.Summary(e.out, matched); err != nil {
+			if err := opts.show(e, matched); err != nil {
 				return err
 			}
 		}
@@ -215,6 +223,9 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 	var allDone []inbox.Notification
 	var failures, total int
 	for i, r := range rules {
+		if i > 0 && opts.list {
+			fmt.Fprintln(e.out)
+		}
 		matched := sels[i].matched
 		if len(matched) == 0 {
 			fmt.Fprintf(e.out, "Rule %q: No notifications match.\n", r.name)
@@ -225,7 +236,9 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 			allDone = append(allDone, succeeded...)
 		}
 		if len(succeeded) > 0 {
-			fmt.Fprintf(e.out, "Rule %q: %s.\n", r.name, describePast(r.kind, len(succeeded)))
+			if err := opts.showDone(e, fmt.Sprintf("Rule %q: ", r.name), r.kind, succeeded); err != nil {
+				return err
+			}
 		}
 		if len(failed) > 0 {
 			reportFailed(e.errOut, fmt.Sprintf("Rule %q: ", r.name), r.kind, failed)
@@ -242,6 +255,26 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 		return fmt.Errorf("%d of %d failed", failures, total)
 	}
 	return nil
+}
+
+// show writes the notifications clean would act on: each one with --list,
+// and a summary otherwise.
+func (o *cleanOptions) show(e *env, notifications []inbox.Notification) error {
+	if o.list {
+		return render.Table(e.out, notifications, e.isTTY, e.width, e.now())
+	}
+	return render.Summary(e.out, notifications)
+}
+
+// showDone reports the notifications the action succeeded on, after a
+// heading that starts with prefix, and lists them with --list.
+func (o *cleanOptions) showDone(e *env, prefix string, kind action.Kind, succeeded []inbox.Notification) error {
+	if !o.list {
+		fmt.Fprintf(e.out, "%s%s.\n", prefix, describePast(kind, len(succeeded)))
+		return nil
+	}
+	fmt.Fprintf(e.out, "%s%s:\n\n", prefix, describePast(kind, len(succeeded)))
+	return render.Table(e.out, succeeded, e.isTTY, e.width, e.now())
 }
 
 // applyAction applies the action to the notifications.
