@@ -142,6 +142,8 @@ func TestCleanErrors(t *testing.T) {
 		{name: "no filters", args: []string{"clean", "--apply"}, want: "no filters given"},
 		{name: "unknown action", args: []string{"clean", "--all", "--action", "delete"}, want: "unknown action"},
 		{name: "no concurrency", args: []string{"clean", "--all", "--concurrency", "0"}, want: "--concurrency"},
+		{name: "sort without list", args: []string{"clean", "--all", "--sort", "repo"}, want: "add --list"},
+		{name: "unknown sort key", args: []string{"clean", "--all", "--list", "--sort", "title"}, want: "invalid --sort key"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,5 +222,25 @@ func TestCleanList(t *testing.T) {
 				t.Errorf("stdout has a summary:\n%s", got.stdout)
 			}
 		})
+	}
+}
+
+func TestCleanListSort(t *testing.T) {
+	// The filters don't need the details, but the table shows the states.
+	got := run(t, newFakeInbox(), t.TempDir(), "clean", "--type", "pr", "--list", "--sort", "repo")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	want := "Would mark 3 notifications as done.\n\n" + rows(1, 4, 2)
+	if !strings.HasPrefix(got.stdout, want) {
+		t.Errorf("stdout doesn't start with %q:\n%s", want, got.stdout)
+	}
+
+	got = run(t, newFakeInbox(), t.TempDir(), "clean", "--type", "pr", "--list", "--sort", "state", "--apply")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if want := "Marked 3 notifications as done:\n\n" + rows(2, 1, 4); got.stdout != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", got.stdout, want)
 	}
 }

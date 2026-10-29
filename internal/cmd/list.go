@@ -18,6 +18,7 @@ type listOptions struct {
 	json    bool
 	limit   int
 	rules   ruleFlags
+	sort    sortFlags
 }
 
 func newListCmd(root *rootOptions, e *env) *cobra.Command {
@@ -26,7 +27,8 @@ func newListCmd(root *rootOptions, e *env) *cobra.Command {
 		Use:   "list [flags]",
 		Short: "List the notifications that match the filters",
 		Long: `List the notifications in your inbox that match the filters, most recently
-updated first. Without filters, it lists them all.
+updated first, or in the order --sort gives. Without filters, it lists them
+all.
 
 --rule lists the notifications that rules from the rules file would act on,
 and --rules those of every rule. See "gh inbox clean --help" for the rules.
@@ -36,6 +38,9 @@ and --rules those of every rule. See "gh inbox clean --help" for the rules.
 
   # Open pull requests waiting for your review, or your teams'
   gh inbox list --state open --review-requested @me
+
+  # Pull requests by repository, and then by state
+  gh inbox list --type pr --sort repo,state
 
   # CI notifications older than a week, as JSON
   gh inbox list --type ci --older-than 7d --json
@@ -50,18 +55,24 @@ and --rules those of every rule. See "gh inbox clean --help" for the rules.
 
 	flags := cmd.Flags()
 	addFilterFlags(flags, &opts.filters)
-	flags.BoolVar(&opts.summary, "summary", false, "Show counts by repository, type, reason and state")
-	flags.BoolVar(&opts.json, "json", false, "Write the notifications as JSON")
-	flags.IntVar(&opts.limit, "limit", 0, "Show at most `n` notifications (default: all)")
+	opts.sort.add(flags)
 	opts.rules.add(flags, "List what the rule `name` from the rules file acts on, instead of filters",
 		"List what every rule in the rules file acts on")
+	flags.IntVar(&opts.limit, "limit", 0, "Show at most `n` notifications (default: all)")
+	flags.BoolVar(&opts.json, "json", false, "Write the notifications as JSON")
+	flags.BoolVar(&opts.summary, "summary", false, "Show counts by repository, type, reason and state")
 	cmd.MarkFlagsMutuallyExclusive("summary", "json")
+	cmd.MarkFlagsMutuallyExclusive("summary", "sort")
+	cmd.MarkFlagsMutuallyExclusive("summary", "reverse")
 	return cmd
 }
 
 func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) error {
 	if opts.limit < 0 {
 		return errors.New("--limit can't be negative")
+	}
+	if err := opts.sort.check(); err != nil {
+		return err
 	}
 	filters := []*filter.Options{&opts.filters}
 	if opts.rules.given() {
@@ -92,16 +103,28 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 	}
 	sel := merge(sels)
 	matched := sel.matched
+
+	// The table and JSON show the state and people of pull requests and
+	// issues, so look them up when the filters didn't need them: before
+	// sorting when the order needs them, and otherwise only for those shown.
+	lookUp := func() error {
+		err := lookUpDetails(ctx, c, matched, false, opts.json, p)
+		p.clear()
+		return err
+	}
+	needDetails := !opts.summary && !sel.detailed
+	if needDetails && opts.sort.needsDetails() {
+		if err := lookUp(); err != nil {
+			return err
+		}
+		needDetails = false
+	}
+	opts.sort.sort(matched)
 	if opts.limit > 0 && len(matched) > opts.limit {
 		matched = matched[:opts.limit]
 	}
-
-	// The table and JSON show the state and people of pull requests and
-	// issues, so look them up when the filters didn't need them.
-	if !opts.summary && !sel.detailed {
-		err := lookUpDetails(ctx, c, matched, false, opts.json, p)
-		p.clear()
-		if err != nil {
+	if needDetails {
+		if err := lookUp(); err != nil {
 			return err
 		}
 	}
