@@ -5,6 +5,8 @@ notifications inbox: mark notifications as done or read, or unsubscribe from
 them, in bulk, by repository, type, reason, age, state, or the people
 involved.
 
+![gh inbox listing review requests, previewing and cleaning merged and closed notifications, and triaging issues](demo/demo.gif)
+
 ```console
 $ gh inbox clean --state merged,closed
 Would mark 1835 notifications as done.
@@ -243,6 +245,7 @@ make lint     # golangci-lint
 make fmt      # format the code
 make govulncheck
 make install  # build and install the working tree as the gh extension
+make demo     # record demo/demo.gif; needs Python 3 with Pillow
 ```
 
 golangci-lint and govulncheck are Go tool dependencies, so `go tool` runs the
@@ -259,6 +262,10 @@ The code is in `internal/`:
 | `action` | Applying an action to many notifications at once |
 | `cache` | The record of notifications marked as done |
 | `render` | Table, summary and JSON output |
+
+`demo/` records the GIF above. `demo/fakeapi` serves a made-up inbox for the
+host `github.localhost`, `capture.py` runs the commands against it in a
+pseudo-terminal, and `render.py` draws the frames.
 
 ## License
 
