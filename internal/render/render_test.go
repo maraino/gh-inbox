@@ -86,6 +86,17 @@ By state
 	}
 }
 
+func TestSummaryWithoutDetails(t *testing.T) {
+	ns := []inbox.Notification{{Repo: "acme/api", Type: inbox.TypePullRequest, Reason: "subscribed"}}
+	var buf bytes.Buffer
+	if err := Summary(&buf, ns); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); strings.Contains(got, "By state") {
+		t.Errorf("Summary() shows states it doesn't know:\n%s", got)
+	}
+}
+
 func TestSummaryLimitsRepos(t *testing.T) {
 	var ns []inbox.Notification
 	for i := range maxRepos + 2 {
