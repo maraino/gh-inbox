@@ -38,7 +38,8 @@ func Table(w io.Writer, notifications []inbox.Notification, isTTY bool, width in
 const maxRepos = 15
 
 // Summary writes how many notifications there are by repository, type,
-// reason and state.
+// reason and state. The states are left out when no pull request or issue
+// details were looked up.
 func Summary(w io.Writer, notifications []inbox.Notification) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	if len(notifications) == 1 {
@@ -64,6 +65,9 @@ func Summary(w io.Writer, notifications []inbox.Notification) error {
 			}
 			return string(n.Subject.State)
 		}},
+	}
+	if !slices.ContainsFunc(notifications, func(n inbox.Notification) bool { return n.Subject != nil }) {
+		groups = groups[:len(groups)-1]
 	}
 	for _, g := range groups {
 		counts := countBy(notifications, g.key)

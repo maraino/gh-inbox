@@ -34,6 +34,10 @@ tidy: ## Tidy go.mod and go.sum
 install: build ## Install the local build as a gh extension
 	gh extension install .
 
+.PHONY: demo
+demo: ## Record demo/demo.gif from a made-up inbox (needs Python 3 with Pillow)
+	demo/record.sh
+
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -f $(BINARY)
