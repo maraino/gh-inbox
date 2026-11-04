@@ -57,6 +57,14 @@ func (o *Options) NeedsIdentity() bool {
 	return slices.ContainsFunc(o.people(), func(p string) bool { return strings.EqualFold(p, Me) })
 }
 
+// NeedsMyTeams reports whether a filter refers to the teams of the
+// authenticated user. Only filters on review requests do, as teams can't be
+// authors or assignees; listing them needs the read:org scope.
+func (o *Options) NeedsMyTeams() bool {
+	return slices.ContainsFunc(slices.Concat(o.ReviewRequested, o.NoReviewRequested, o.Involves, o.NotInvolves),
+		func(p string) bool { return strings.EqualFold(p, Me) })
+}
+
 // people returns every value of the filters on people.
 func (o *Options) people() []string {
 	return slices.Concat(o.Authors, o.NotAuthors, o.AssignedTo, o.NotAssignedTo,

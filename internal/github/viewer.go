@@ -11,9 +11,9 @@ import (
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
 
-// Viewer returns the authenticated user and the teams they belong to.
-// Listing teams needs the read:org scope.
-func (c *Client) Viewer(ctx context.Context) (inbox.Identity, error) {
+// Viewer returns the authenticated user and, with teams, the teams they
+// belong to. Listing teams needs the read:org scope.
+func (c *Client) Viewer(ctx context.Context, teams bool) (inbox.Identity, error) {
 	var user struct {
 		Login string `json:"login"`
 	}
@@ -22,6 +22,9 @@ func (c *Client) Viewer(ctx context.Context) (inbox.Identity, error) {
 	}
 
 	id := inbox.Identity{Login: user.Login}
+	if !teams {
+		return id, nil
+	}
 	for path := "user/teams?per_page=100"; path != ""; {
 		var page []struct {
 			Slug         string `json:"slug"`

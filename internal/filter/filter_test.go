@@ -300,4 +300,25 @@ func TestOptions(t *testing.T) {
 	if o := (Options{Authors: []string{"@ME"}}); !o.NeedsIdentity() {
 		t.Error("NeedsIdentity() = false with @ME")
 	}
+	for _, o := range []Options{
+		{Authors: []string{"@me"}},
+		{NotAuthors: []string{"@me"}},
+		{AssignedTo: []string{"@me"}},
+		{NotAssignedTo: []string{"@me"}},
+		{ReviewRequested: []string{"alice"}},
+	} {
+		if o.NeedsMyTeams() {
+			t.Errorf("NeedsMyTeams() = true for %+v", o)
+		}
+	}
+	for _, o := range []Options{
+		{ReviewRequested: []string{"@me"}},
+		{NoReviewRequested: []string{"@ME"}},
+		{Involves: []string{"@me"}},
+		{NotInvolves: []string{"@me"}},
+	} {
+		if !o.NeedsMyTeams() {
+			t.Errorf("NeedsMyTeams() = false for %+v", o)
+		}
+	}
 }

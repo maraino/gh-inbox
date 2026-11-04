@@ -34,9 +34,10 @@ const (
 fragment pr on PullRequest {
   number state isDraft url
   author { login }
-  labels(first: 100) { nodes { name } }
-  assignees(first: 100) { nodes { login } }
+  labels(first: 100) { nodes { name } pageInfo { hasNextPage } }
+  assignees(first: 100) { nodes { login } pageInfo { hasNextPage } }
   reviewRequests(first: 100) {
+    pageInfo { hasNextPage }
     nodes {
       requestedReviewer {
         __typename
@@ -51,8 +52,8 @@ fragment pr on PullRequest {
 fragment issue on Issue {
   number state url
   author { login }
-  labels(first: 100) { nodes { name } }
-  assignees(first: 100) { nodes { login } }
+  labels(first: 100) { nodes { name } pageInfo { hasNextPage } }
+  assignees(first: 100) { nodes { login } pageInfo { hasNextPage } }
 }`
 	// teamFields select the teams whose review is requested. Reading them
 	// needs the read:org scope.
@@ -201,6 +202,11 @@ func (c *Client) SubjectDetails(ctx context.Context, notifications []inbox.Notif
 	return details, nil
 }
 
+// pageInfo says whether a GraphQL connection has more than was returned.
+type pageInfo struct {
+	HasNextPage bool `json:"hasNextPage"`
+}
+
 // apiSubject is the GraphQL shape of a pull request or issue.
 type apiSubject struct {
 	Number  int    `json:"number"`
@@ -214,11 +220,13 @@ type apiSubject struct {
 		Nodes []struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
+		PageInfo pageInfo `json:"pageInfo"`
 	} `json:"labels"`
 	Assignees struct {
 		Nodes []struct {
 			Login string `json:"login"`
 		} `json:"nodes"`
+		PageInfo pageInfo `json:"pageInfo"`
 	} `json:"assignees"`
 	ReviewRequests struct {
 		Nodes []struct {
@@ -231,6 +239,7 @@ type apiSubject struct {
 				} `json:"organization"`
 			} `json:"requestedReviewer"`
 		} `json:"nodes"`
+		PageInfo pageInfo `json:"pageInfo"`
 	} `json:"reviewRequests"`
 }
 
@@ -294,7 +303,13 @@ func (c *Client) lookUpBatch(ctx context.Context, refs []subjectRef, opts Detail
 		if ref.isPR {
 			subject = repo.PullRequest
 		}
-		if subject != nil {
+		switch {
+		case subject == nil:
+		case subject.truncated():
+			// Filters such as --not-label could match on what's missing, so
+			// it's treated as a subject that can't be read.
+			c.logf("* Ignoring %s: it has more labels, assignees or review requests than a query returns", ref.url)
+		default:
 			found[ref.url] = subject.toSubject()
 		}
 	}
@@ -322,6 +337,12 @@ func onlyUnreadable(err error) bool {
 		}
 	}
 	return true
+}
+
+// truncated reports whether the query left out some of the subject's labels,
+// assignees or review requests.
+func (s *apiSubject) truncated() bool {
+	return s.Labels.PageInfo.HasNextPage || s.Assignees.PageInfo.HasNextPage || s.ReviewRequests.PageInfo.HasNextPage
 }
 
 func (s *apiSubject) toSubject() *inbox.Subject {

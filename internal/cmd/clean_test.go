@@ -142,6 +142,7 @@ func TestCleanErrors(t *testing.T) {
 		{name: "no filters", args: []string{"clean", "--apply"}, want: "no filters given"},
 		{name: "unknown action", args: []string{"clean", "--all", "--action", "delete"}, want: "unknown action"},
 		{name: "no concurrency", args: []string{"clean", "--all", "--concurrency", "0"}, want: "--concurrency"},
+		{name: "rules file without rules", args: []string{"clean", "--all", "--apply", "--rules-file", "rules.yml"}, want: "--rules-file needs"},
 		{name: "sort without list", args: []string{"clean", "--all", "--sort", "repo"}, want: "add --list"},
 		{name: "unknown sort key", args: []string{"clean", "--all", "--list", "--sort", "title"}, want: "invalid --sort key"},
 	}

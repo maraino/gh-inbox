@@ -72,6 +72,9 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 	if err := opts.sort.check(); err != nil {
 		return err
 	}
+	if err := opts.rules.check(); err != nil {
+		return err
+	}
 	filters := []*filter.Options{&opts.filters}
 	if opts.rules.given() {
 		if !opts.filters.IsEmpty() {

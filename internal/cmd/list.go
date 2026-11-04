@@ -33,7 +33,7 @@ all.
 --rule lists the notifications that rules from the rules file would act on,
 and --rules those of every rule. See "gh inbox clean --help" for the rules.
 ` + filterHelp,
-		Example: `  # How many notifications there are, by repository, type, reason and state
+		Example: `  # How many notifications there are, by repository, type and reason
   gh inbox list --summary
 
   # Open pull requests waiting for your review, or your teams'
@@ -60,7 +60,7 @@ and --rules those of every rule. See "gh inbox clean --help" for the rules.
 		"List what every rule in the rules file acts on")
 	flags.IntVar(&opts.limit, "limit", 0, "Show at most `n` notifications (default: all)")
 	flags.BoolVar(&opts.json, "json", false, "Write the notifications as JSON")
-	flags.BoolVar(&opts.summary, "summary", false, "Show counts by repository, type, reason and state")
+	flags.BoolVar(&opts.summary, "summary", false, "Show counts by repository, type and reason, and by state when a filter looks it up")
 	cmd.MarkFlagsMutuallyExclusive("summary", "json")
 	cmd.MarkFlagsMutuallyExclusive("summary", "sort")
 	cmd.MarkFlagsMutuallyExclusive("summary", "reverse")
@@ -72,6 +72,9 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 		return errors.New("--limit can't be negative")
 	}
 	if err := opts.sort.check(); err != nil {
+		return err
+	}
+	if err := opts.rules.check(); err != nil {
 		return err
 	}
 	filters := []*filter.Options{&opts.filters}

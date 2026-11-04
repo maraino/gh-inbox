@@ -171,7 +171,7 @@ func TestViewer(t *testing.T) {
 		}
 	}))
 
-	got, err := c.Viewer(t.Context())
+	got, err := c.Viewer(t.Context(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,15 @@ func TestViewerWithoutReadOrg(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusForbidden)
 	}))
-	if _, err := c.Viewer(t.Context()); !errors.Is(err, ErrMissingReadOrg) {
+	if _, err := c.Viewer(t.Context(), true); !errors.Is(err, ErrMissingReadOrg) {
 		t.Errorf("Viewer() error = %v, want %v", err, ErrMissingReadOrg)
+	}
+	// The login alone doesn't need the scope.
+	got, err := c.Viewer(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Login != "me" || got.Teams != nil {
+		t.Errorf("Viewer() = %+v, want only the login", got)
 	}
 }

@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +14,9 @@ import (
 )
 
 const (
+	// requestTimeout limits each request, so that a stalled connection fails
+	// and is retried instead of hanging.
+	requestTimeout = time.Minute
 	// maxAttempts is how many times a request is tried before giving up.
 	maxAttempts = 5
 	// baseDelay is the wait before the first retry; it doubles after each.
@@ -59,10 +64,10 @@ func retryDelay(err error, attempt int, now time.Time) (time.Duration, bool) {
 
 	var httpErr *api.HTTPError
 	if !errors.As(err, &httpErr) {
-		return 0, false
+		return backoff, isTransportError(err)
 	}
 	switch httpErr.StatusCode {
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return backoff, true
 	case http.StatusForbidden, http.StatusTooManyRequests:
 		if wait, ok := rateLimitWait(httpErr.Headers, httpErr.StatusCode, now); ok {
@@ -76,6 +81,17 @@ func retryDelay(err error, attempt int, now time.Time) (time.Duration, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// isTransportError reports whether err is a failure to get a response, such
+// as a dropped connection or a timeout, rather than something the server
+// answered or the user canceling.
+func isTransportError(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // rateLimitWait returns how long to wait for a rate limit to lift, from the

@@ -48,7 +48,7 @@ func selectEach(ctx context.Context, c client, opts []*filter.Options, done *cac
 	env := filter.Env{Now: now}
 	if slices.ContainsFunc(opts, (*filter.Options).NeedsIdentity) {
 		p.show("Looking up your user and teams…")
-		me, err := c.Viewer(ctx)
+		me, err := c.Viewer(ctx, slices.ContainsFunc(opts, (*filter.Options).NeedsMyTeams))
 		if err != nil {
 			return nil, err
 		}

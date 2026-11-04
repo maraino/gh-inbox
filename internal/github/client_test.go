@@ -2,10 +2,12 @@ package github
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -126,6 +128,29 @@ func TestRetries(t *testing.T) {
 			wantSlept:    []time.Duration{time.Second},
 		},
 		{
+			name: "internal server error then success",
+			responses: []func(http.ResponseWriter){
+				status(http.StatusInternalServerError),
+				status(http.StatusNoContent),
+			},
+			wantRequests: 2,
+			wantSlept:    []time.Duration{time.Second},
+		},
+		{
+			name: "dropped connection then success",
+			responses: []func(http.ResponseWriter){
+				func(w http.ResponseWriter) {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err == nil {
+						conn.Close()
+					}
+				},
+				status(http.StatusNoContent),
+			},
+			wantRequests: 2,
+			wantSlept:    []time.Duration{time.Second},
+		},
+		{
 			name: "secondary rate limit with Retry-After",
 			responses: []func(http.ResponseWriter){
 				func(w http.ResponseWriter) {
@@ -178,22 +203,43 @@ func TestRetries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var requests int
+			// Atomic because a dropped connection moves the next request to
+			// another goroutine, and counted first because the client can
+			// retry as soon as the connection drops.
+			var requests atomic.Int64
 			c, slept := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				tt.responses[requests](w)
-				requests++
+				tt.responses[requests.Add(1)-1](w)
 			}))
 			err := c.MarkDone(t.Context(), "42")
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("MarkDone() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if requests != tt.wantRequests {
-				t.Errorf("server got %d requests, want %d", requests, tt.wantRequests)
+			if got := int(requests.Load()); got != tt.wantRequests {
+				t.Errorf("server got %d requests, want %d", got, tt.wantRequests)
 			}
 			if !equalDurations(*slept, tt.wantSlept) {
 				t.Errorf("slept %v, want %v", *slept, tt.wantSlept)
 			}
 		})
+	}
+}
+
+func TestCanceledRequestIsNotRetried(t *testing.T) {
+	c, slept := newTestClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := c.MarkDone(ctx, "42"); !errors.Is(err, context.Canceled) {
+		t.Errorf("MarkDone() error = %v, want %v", err, context.Canceled)
+	}
+	if len(*slept) != 0 {
+		t.Errorf("slept %v, want no retries", *slept)
+	}
+}
+
+func TestRequestTimeout(t *testing.T) {
+	c, _ := newTestClient(t, http.NotFoundHandler())
+	if c.opts.Timeout != requestTimeout {
+		t.Errorf("Timeout = %v, want %v", c.opts.Timeout, requestTimeout)
 	}
 }
 

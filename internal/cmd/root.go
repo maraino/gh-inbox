@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +31,7 @@ func Execute(ctx context.Context) error {
 type client interface {
 	Notifications(ctx context.Context) ([]inbox.Notification, error)
 	SubjectDetails(ctx context.Context, notifications []inbox.Notification, opts github.DetailsOptions) (map[string]*inbox.Subject, error)
-	Viewer(ctx context.Context) (inbox.Identity, error)
+	Viewer(ctx context.Context, teams bool) (inbox.Identity, error)
 	Unwatch(ctx context.Context, repo string) error
 	action.Client
 }
@@ -200,5 +201,10 @@ func (o *rootOptions) openCache(e *env) (*cache.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locating the record of notifications marked as done: %w", err)
 	}
-	return cache.Open(path)
+	store, err := cache.Open(path)
+	if errors.Is(err, cache.ErrCorrupt) {
+		fmt.Fprintf(e.errOut, "warning: ignoring the record of notifications marked as done: %v\n", err)
+		return store, nil
+	}
+	return store, err
 }
