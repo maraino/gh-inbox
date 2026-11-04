@@ -162,7 +162,7 @@ rule stops them all before anything is done.
 ### Examples
 
 ```sh
-# What's in the inbox, by repository, type, reason and state
+# What's in the inbox, by repository, type and reason
 gh inbox list --summary
 
 # Pull requests waiting for your review, or your teams'

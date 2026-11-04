@@ -20,6 +20,9 @@ import (
 // version is the version of the file format.
 const version = 1
 
+// ErrCorrupt reports a record that can't be read.
+var ErrCorrupt = errors.New("the file is corrupt")
+
 // Store is the record of the threads marked as done. It isn't safe for
 // concurrent use.
 type Store struct {
@@ -55,7 +58,9 @@ func XDGPath(xdgVar, fallback string, elem ...string) (string, error) {
 	return filepath.Join(append([]string{dir}, elem...)...), nil
 }
 
-// Open reads the record at path. A missing file is an empty record.
+// Open reads the record at path. A missing file is an empty record. A corrupt
+// file returns an empty record and ErrCorrupt: losing the record only loses
+// an optimization, so callers can warn and carry on.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, threads: make(map[string]time.Time)}
 	data, err := os.ReadFile(path)
@@ -67,7 +72,7 @@ func Open(path string) (*Store, error) {
 	}
 	var f file
 	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return s, fmt.Errorf("reading %s: %w: %w", path, ErrCorrupt, err)
 	}
 	if f.Version != version {
 		// A record from another version is only an optimization lost.

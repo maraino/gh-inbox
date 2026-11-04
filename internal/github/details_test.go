@@ -230,3 +230,28 @@ func TestSubjectDetailsFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestSubjectDetailsTruncated(t *testing.T) {
+	notifications := []inbox.Notification{
+		{Type: inbox.TypePullRequest, SubjectURL: "https://api.github.com/repos/o/r/pulls/1"},
+		{Type: inbox.TypePullRequest, SubjectURL: "https://api.github.com/repos/o/r/pulls/2"},
+		{Type: inbox.TypePullRequest, SubjectURL: "https://api.github.com/repos/o/r/pulls/3"},
+		{Type: inbox.TypePullRequest, SubjectURL: "https://api.github.com/repos/o/r/pulls/4"},
+	}
+	more := `"pageInfo": {"hasNextPage": true}`
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data": {
+			"s0": {"pullRequest": {"number": 1, "state": "OPEN", "labels": {` + more + `}}},
+			"s1": {"pullRequest": {"number": 2, "state": "OPEN", "assignees": {` + more + `}}},
+			"s2": {"pullRequest": {"number": 3, "state": "OPEN", "reviewRequests": {` + more + `}}},
+			"s3": {"pullRequest": {"number": 4, "state": "OPEN"}}
+		}}`))
+	}))
+	got, err := c.SubjectDetails(t.Context(), notifications, DetailsOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got["https://api.github.com/repos/o/r/pulls/4"] == nil {
+		t.Errorf("SubjectDetails() = %v, want only the pull request with nothing left out", got)
+	}
+}

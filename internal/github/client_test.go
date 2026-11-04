@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +127,29 @@ func TestRetries(t *testing.T) {
 			wantSlept:    []time.Duration{time.Second},
 		},
 		{
+			name: "internal server error then success",
+			responses: []func(http.ResponseWriter){
+				status(http.StatusInternalServerError),
+				status(http.StatusNoContent),
+			},
+			wantRequests: 2,
+			wantSlept:    []time.Duration{time.Second},
+		},
+		{
+			name: "dropped connection then success",
+			responses: []func(http.ResponseWriter){
+				func(w http.ResponseWriter) {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err == nil {
+						conn.Close()
+					}
+				},
+				status(http.StatusNoContent),
+			},
+			wantRequests: 2,
+			wantSlept:    []time.Duration{time.Second},
+		},
+		{
 			name: "secondary rate limit with Retry-After",
 			responses: []func(http.ResponseWriter){
 				func(w http.ResponseWriter) {
@@ -194,6 +218,25 @@ func TestRetries(t *testing.T) {
 				t.Errorf("slept %v, want %v", *slept, tt.wantSlept)
 			}
 		})
+	}
+}
+
+func TestCanceledRequestIsNotRetried(t *testing.T) {
+	c, slept := newTestClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := c.MarkDone(ctx, "42"); !errors.Is(err, context.Canceled) {
+		t.Errorf("MarkDone() error = %v, want %v", err, context.Canceled)
+	}
+	if len(*slept) != 0 {
+		t.Errorf("slept %v, want no retries", *slept)
+	}
+}
+
+func TestRequestTimeout(t *testing.T) {
+	c, _ := newTestClient(t, http.NotFoundHandler())
+	if c.opts.Timeout != requestTimeout {
+		t.Errorf("Timeout = %v, want %v", c.opts.Timeout, requestTimeout)
 	}
 }
 

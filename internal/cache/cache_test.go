@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -51,11 +52,15 @@ func TestOpen(t *testing.T) {
 		return path
 	}
 
-	if _, err := Open(write("corrupt.json", "{")); err == nil {
-		t.Error("Open() of a corrupt file succeeded, want an error")
+	s, err := Open(write("corrupt.json", "{"))
+	if !errors.Is(err, ErrCorrupt) {
+		t.Errorf("Open() of a corrupt file: error = %v, want %v", err, ErrCorrupt)
+	}
+	if s == nil || s.IsDone("1", time.Now()) {
+		t.Errorf("Open() of a corrupt file = %+v, want an empty record", s)
 	}
 
-	s, err := Open(write("old.json", `{"version": 0, "threads": {"1": "2026-10-20T12:00:00Z"}}`))
+	s, err = Open(write("old.json", `{"version": 0, "threads": {"1": "2026-10-20T12:00:00Z"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

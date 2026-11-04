@@ -56,6 +56,7 @@ func New(opts Options) (*Client, error) {
 		AuthToken: opts.AuthToken,
 		Transport: opts.Transport,
 		Log:       opts.Log,
+		Timeout:   requestTimeout,
 		// A redirect can turn a DELETE into a GET that succeeds without doing
 		// anything, so report redirects instead of following them.
 		CheckRedirect: func(*http.Request, []*http.Request) error {

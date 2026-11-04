@@ -175,6 +175,15 @@ func (f *ruleFlags) given() bool {
 	return len(f.names) > 0 || f.all
 }
 
+// check reports a rules file given without choosing rules, which would
+// otherwise be ignored.
+func (f *ruleFlags) check() error {
+	if f.file != "" && !f.given() {
+		return errors.New("--rules-file needs --rule or --rules")
+	}
+	return nil
+}
+
 // load reads the rules file and returns the rules chosen.
 func (f *ruleFlags) load(e *env) ([]rule, error) {
 	if len(f.names) > 0 && f.all {

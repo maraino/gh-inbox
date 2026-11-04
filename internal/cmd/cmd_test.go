@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -56,9 +57,15 @@ func (c *fakeClient) SubjectDetails(_ context.Context, ns []inbox.Notification, 
 	return found, nil
 }
 
-func (c *fakeClient) Viewer(context.Context) (inbox.Identity, error) {
+func (c *fakeClient) Viewer(_ context.Context, teams bool) (inbox.Identity, error) {
 	if c.me.Login == "" {
 		return inbox.Identity{}, errors.New("no viewer")
+	}
+	if !teams {
+		return inbox.Identity{Login: c.me.Login}, nil
+	}
+	if c.noReadOrg {
+		return inbox.Identity{}, github.ErrMissingReadOrg
 	}
 	return c.me, nil
 }
@@ -308,6 +315,46 @@ func TestListFormats(t *testing.T) {
 	}
 }
 
+func TestMeWithoutReadOrg(t *testing.T) {
+	c := newFakeInbox()
+	c.noReadOrg = true
+	if got := run(t, c, t.TempDir(), "list", "--assigned-to", "@me"); got.err != nil {
+		t.Errorf("--assigned-to @me needs read:org: %v", got.err)
+	}
+	if got := run(t, c, t.TempDir(), "list", "--not-involves", "@me"); !errors.Is(got.err, github.ErrMissingReadOrg) {
+		t.Errorf("--not-involves @me: error = %v, want %v", got.err, github.ErrMissingReadOrg)
+	}
+}
+
+func TestCorruptRecord(t *testing.T) {
+	cacheDir := t.TempDir()
+	path := filepath.Join(cacheDir, "github.com", "done.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := newFakeInbox()
+	got := run(t, c, cacheDir, "clean", "--state", "merged", "--apply")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if !strings.Contains(got.stderr, "warning: ignoring the record") {
+		t.Errorf("stderr doesn't warn about the record:\n%s", got.stderr)
+	}
+
+	// The run replaced the corrupt record with a good one.
+	got = run(t, c, cacheDir, "list", "--state", "merged")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if strings.Contains(got.stderr, "warning") || got.stdout != "" {
+		t.Errorf("after replacing the record: stdout = %q, stderr = %q", got.stdout, got.stderr)
+	}
+}
+
 func TestListErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"list", "--type", "pull"},
@@ -317,6 +364,8 @@ func TestListErrors(t *testing.T) {
 		{"list", "--assigned-to", "acme/backend"},
 		{"list", "extra"},
 		{"list", "--sort", "number"},
+		{"list", "--rules-file", "rules.yml"},
+		{"list", "--state", "merged", "--rules-file", "rules.yml"},
 		{"list", "--summary", "--sort", "repo"},
 		{"list", "--summary", "--reverse"},
 	} {

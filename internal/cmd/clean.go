@@ -97,6 +97,9 @@ first rule it matches. A rule must have filters.
 			if err := opts.sort.check(); err != nil {
 				return err
 			}
+			if err := opts.rules.check(); err != nil {
+				return err
+			}
 			opts.actionSet = cmd.Flags().Changed("action")
 			if opts.rules.given() {
 				return runCleanRules(cmd.Context(), root, e, opts)
