@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -202,17 +203,19 @@ func TestRetries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var requests int
+			// Atomic because a dropped connection moves the next request to
+			// another goroutine, and counted first because the client can
+			// retry as soon as the connection drops.
+			var requests atomic.Int64
 			c, slept := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				tt.responses[requests](w)
-				requests++
+				tt.responses[requests.Add(1)-1](w)
 			}))
 			err := c.MarkDone(t.Context(), "42")
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("MarkDone() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if requests != tt.wantRequests {
-				t.Errorf("server got %d requests, want %d", requests, tt.wantRequests)
+			if got := int(requests.Load()); got != tt.wantRequests {
+				t.Errorf("server got %d requests, want %d", got, tt.wantRequests)
 			}
 			if !equalDurations(*slept, tt.wantSlept) {
 				t.Errorf("slept %v, want %v", *slept, tt.wantSlept)
