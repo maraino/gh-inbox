@@ -18,6 +18,8 @@ sleep 1
 export HTTP_PROXY=http://127.0.0.1:8765 http_proxy=http://127.0.0.1:8765 NO_PROXY= no_proxy=
 export GH_HOST=github.localhost GH_TOKEN=demo GH_ENTERPRISE_TOKEN=demo
 export XDG_CACHE_HOME="$work/cache" XDG_STATE_HOME="$work/state" XDG_CONFIG_HOME="$work/config" GH_CONFIG_DIR="$work/gh"
+# capture.py doesn't understand hyperlinks, and a GIF can't be clicked.
+export FORCE_HYPERLINK=0
 # "o" in triage opens nothing.
 export BROWSER=true
 

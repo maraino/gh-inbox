@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cli/go-gh/v2/pkg/text"
+
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
 
@@ -33,7 +35,7 @@ var sample = []inbox.Notification{
 
 func TestTable(t *testing.T) {
 	var buf bytes.Buffer
-	if err := Table(&buf, sample, false, 0, now); err != nil {
+	if err := Table(&buf, sample, false, 0, now, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "acme/api\t#7\tpr\tmerged\treview_requested\t2026-10-20T09:00:00Z\tFix it\n" +
@@ -46,7 +48,7 @@ func TestTable(t *testing.T) {
 
 func TestTableTTY(t *testing.T) {
 	var buf bytes.Buffer
-	if err := Table(&buf, sample, true, 120, now); err != nil {
+	if err := Table(&buf, sample, true, 120, now, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
@@ -54,6 +56,68 @@ func TestTableTTY(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("Table() on a terminal doesn't contain %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestTableHyperlinks(t *testing.T) {
+	link := func(n inbox.Notification) string { return "https://example.com/" + n.ID }
+	clickable := func(id string) string { return "\x1b]8;;https://example.com/" + id + "\x1b\\>>\x1b]8;;\x1b\\ " }
+
+	var buf bytes.Buffer
+	if err := Table(&buf, sample[:2], true, 120, now, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		// Only the >> is a link.
+		clickable("1") + sample[0].Title,
+		// Notifications without a number have a link too.
+		clickable("2") + sample[1].Title,
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("Table() doesn't contain %q:\n%q", want, buf.String())
+		}
+	}
+
+	// The link stays whole when the title is truncated, and the row stays
+	// within the width.
+	long := []inbox.Notification{sample[0], sample[0]}
+	long[0].Title = strings.Repeat("long title ", 20)
+	buf.Reset()
+	if err := Table(&buf, long, true, 80, now, link); err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.Lines(buf.String()) {
+		if !strings.HasPrefix(line, "acme") {
+			continue
+		}
+		if !strings.Contains(line, clickable("1")) {
+			t.Errorf("row doesn't have a whole link: %q", line)
+		}
+		if got := text.DisplayWidth(strings.TrimRight(line, "\n")); got > 80 {
+			t.Errorf("row is %d wide, want at most 80: %q", got, line)
+		}
+	}
+
+	// A column too narrow for the >> doesn't push the row past the width.
+	buf.Reset()
+	if err := Table(&buf, long, true, 20, now, link); err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.Lines(buf.String()) {
+		if got := text.DisplayWidth(strings.TrimRight(line, "\n")); got > 20 {
+			t.Errorf("row is %d wide, want at most 20: %q", got, line)
+		}
+	}
+}
+
+func TestTableHyperlinksOnlyOnATerminal(t *testing.T) {
+	var buf bytes.Buffer
+	link := func(inbox.Notification) string { return "https://example.com" }
+	if err := Table(&buf, sample, false, 0, now, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); strings.Contains(got, linkText) || strings.Contains(got, "\x1b") {
+		t.Errorf("Table() outside a terminal has hyperlinks:\n%q", got)
 	}
 }
 

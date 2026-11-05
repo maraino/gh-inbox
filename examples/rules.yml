@@ -12,6 +12,12 @@
 #
 # Marking as done is the safest action: a thread marked as done comes back
 # when there's new activity on it.
+
+# Settings apply to every run, with or without rules.
+settings:
+  # Add a clickable >> before the titles in tables, as --links does.
+  links: false
+
 rules:
   # Pull requests and issues that are finished.
   - name: merged

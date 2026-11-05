@@ -82,7 +82,7 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 		if !opts.filters.IsEmpty() {
 			return errors.New("rules can't be combined with filters")
 		}
-		rules, err := opts.rules.load(e)
+		rules, err := opts.rules.load(root.rulesFile)
 		if err != nil {
 			return err
 		}
@@ -141,7 +141,7 @@ func runList(ctx context.Context, root *rootOptions, e *env, opts *listOptions) 
 	case len(matched) == 0:
 		fmt.Fprintln(e.errOut, "No notifications match.")
 	default:
-		err = render.Table(e.out, matched, e.isTTY, e.width, e.now())
+		err = root.writeTable(e, matched)
 	}
 	if err != nil {
 		return err

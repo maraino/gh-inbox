@@ -80,7 +80,7 @@ func runTriage(ctx context.Context, root *rootOptions, e *env, opts *triageOptio
 		if !opts.filters.IsEmpty() {
 			return errors.New("rules can't be combined with filters")
 		}
-		rules, err := opts.rules.load(e)
+		rules, err := opts.rules.load(root.rulesFile)
 		if err != nil {
 			return err
 		}
