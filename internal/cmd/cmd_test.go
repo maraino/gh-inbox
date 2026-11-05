@@ -143,6 +143,7 @@ func runEnv(t *testing.T, c *fakeClient, cacheDir string, change func(*env), arg
 		cachePath: func(host string) (string, error) {
 			return filepath.Join(cacheDir, host, "done.json"), nil
 		},
+		rulesPath: func() (string, error) { return filepath.Join(cacheDir, "rules.yml"), nil },
 	}
 	change(e)
 	cmd := newRootCmd(e)
@@ -352,6 +353,150 @@ func TestCorruptRecord(t *testing.T) {
 	}
 	if strings.Contains(got.stderr, "warning") || got.stdout != "" {
 		t.Errorf("after replacing the record: stdout = %q, stderr = %q", got.stdout, got.stderr)
+	}
+}
+
+func TestHyperlinks(t *testing.T) {
+	link := "\x1b]8;;https://github.com/acme/api/pull/1\x1b\\>>\x1b]8;;\x1b\\ Merged fix"
+	const on, off = "settings:\n  links: true\n", "settings:\n  links: false\n"
+	tests := []struct {
+		name  string
+		pipe  bool
+		force string
+		rules string
+		args  []string
+		want  bool
+	}{
+		{name: "off by default", args: []string{"list"}},
+		{name: "flag", args: []string{"list", "--links"}, want: true},
+		{name: "environment", force: "1", args: []string{"list"}, want: true},
+		{name: "environment off", force: "0", args: []string{"list"}},
+		{name: "environment true", force: "true", args: []string{"list"}, want: true},
+		{name: "environment false", force: "false", args: []string{"list"}},
+		{name: "environment false beats setting", force: "false", rules: on, args: []string{"list"}},
+		{name: "environment not a boolean", force: "maybe", rules: on, args: []string{"list"}, want: true},
+		{name: "setting", rules: on, args: []string{"list"}, want: true},
+		{name: "setting off", rules: off, args: []string{"list"}},
+		{name: "flag beats environment", force: "0", args: []string{"list", "--links"}, want: true},
+		{name: "flag off beats setting", rules: on, args: []string{"list", "--links=false"}},
+		{name: "flag off beats environment", force: "1", args: []string{"list", "--links=false"}},
+		{name: "environment beats setting", force: "0", rules: on, args: []string{"list"}},
+		{name: "environment on beats setting", force: "1", rules: off, args: []string{"list"}, want: true},
+		{name: "flag in a pipe", pipe: true, args: []string{"list", "--links"}},
+		{name: "environment in a pipe", pipe: true, force: "1", args: []string{"list"}},
+		{name: "setting in a pipe", pipe: true, rules: on, args: []string{"list"}},
+		{name: "clean dry run", rules: on, args: []string{"clean", "--state", "merged", "--list"}, want: true},
+		{name: "clean apply", rules: on, args: []string{"clean", "--state", "merged", "--list", "--apply"}, want: true},
+		{name: "setting with rules", rules: on + testRules, args: []string{"list", "--rules"}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rules.yml")
+			if tt.rules != "" {
+				path = writeRules(t, tt.rules)
+			}
+			got := runEnv(t, newFakeInbox(), t.TempDir(), func(e *env) {
+				e.isTTY, e.width = !tt.pipe, 200
+				e.forceHyperlink = tt.force
+				e.rulesPath = func() (string, error) { return path, nil }
+			}, tt.args...)
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			if has := strings.Contains(got.stdout, link); has != tt.want {
+				t.Errorf("stdout has the link = %v, want %v:\n%q", has, tt.want, got.stdout)
+			}
+			if !tt.want && strings.Contains(got.stdout, "\x1b]") {
+				t.Errorf("stdout has a hyperlink: %q", got.stdout)
+			}
+		})
+	}
+}
+
+func TestSettingsWithRulesFile(t *testing.T) {
+	// --rules-file replaces the default file, settings included.
+	file := writeRules(t, "settings:\n  links: true\n"+testRules)
+	got := runEnv(t, newFakeInbox(), t.TempDir(), func(e *env) {
+		e.isTTY, e.width = true, 200
+		e.rulesPath = func() (string, error) { return "", errors.New("the default file was read") }
+	}, "clean", "--rules", "--rules-file", file, "--list")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if !strings.Contains(got.stdout, "\x1b]8;;") || strings.Contains(got.stderr, "warning") {
+		t.Errorf("stdout = %q, stderr = %q", got.stdout, got.stderr)
+	}
+}
+
+func TestRulesFileMistakes(t *testing.T) {
+	mistakes := map[string]string{
+		"unknown setting":  "settings:\n  link: true\n",
+		"hostname setting": "settings:\n  hostname: ghe.example.com\n",
+		"invalid setting":  "settings:\n  links: maybe\n",
+		"invalid file":     "settings: [",
+		"unknown field":    "setting:\n  links: true\n",
+		"mistake in rule":  "settings:\n  links: true\nrules:\n  - name: bad\n    filters:\n      color: red\n",
+		"second document":  "settings:\n  links: false\n---\nrules:\n  - name: bad\n    filters:\n      color: red\n",
+	}
+	commands := [][]string{
+		{"list"},
+		{"list", "--rules"},
+		{"clean", "--all", "--apply"},
+		{"triage"},
+		{"unwatch"},
+	}
+	for name, content := range mistakes {
+		for _, args := range commands {
+			t.Run(name+"/"+args[0], func(t *testing.T) {
+				path := writeRules(t, content)
+				c := newFakeInbox()
+				var opened []string
+				got := runEnv(t, c, t.TempDir(), func(e *env) {
+					terminal("q", &opened)(e)
+					e.rulesPath = func() (string, error) { return path, nil }
+				}, args...)
+				if got.err == nil || !strings.Contains(got.err.Error(), path) {
+					t.Errorf("%v: error = %v, want one naming %s", args, got.err, path)
+				}
+				if got.stdout != "" || len(c.actions) != 0 {
+					t.Errorf("%v: ran with a broken file: stdout = %q, actions = %v", args, got.stdout, c.actions)
+				}
+			})
+		}
+	}
+
+	// A file with only settings is fine until rules are asked for.
+	path := writeRules(t, "settings:\n  links: true\n")
+	settingsOnly := func(e *env) { e.rulesPath = func() (string, error) { return path, nil } }
+	if got := runEnv(t, newFakeInbox(), t.TempDir(), settingsOnly, "list"); got.err != nil {
+		t.Errorf("list: %v", got.err)
+	}
+	if got := runEnv(t, newFakeInbox(), t.TempDir(), settingsOnly, "list", "--rules"); got.err == nil || !strings.Contains(got.err.Error(), "no rules") {
+		t.Errorf("list --rules: error = %v, want no rules", got.err)
+	}
+
+	// Commands that don't use the file still work.
+	broken := writeRules(t, "settings: [")
+	for _, args := range [][]string{{"help"}, {"list", "--help"}, {"completion", "bash"}} {
+		got := runEnv(t, newFakeInbox(), t.TempDir(), func(e *env) {
+			e.rulesPath = func() (string, error) { return broken, nil }
+		}, args...)
+		if got.err != nil {
+			t.Errorf("%v: %v", args, got.err)
+		}
+	}
+}
+
+func TestNoDefaultRulesPath(t *testing.T) {
+	// Not knowing where the default file is only matters when using rules.
+	noPath := func(e *env) {
+		e.rulesPath = func() (string, error) { return "", errors.New("no home") }
+	}
+	if got := runEnv(t, newFakeInbox(), t.TempDir(), noPath, "list"); got.err != nil {
+		t.Errorf("list: %v", got.err)
+	}
+	if got := runEnv(t, newFakeInbox(), t.TempDir(), noPath, "list", "--rules"); got.err == nil || got.err.Error() != "no home" {
+		t.Errorf("list --rules: error = %v, want no home", got.err)
 	}
 }
 

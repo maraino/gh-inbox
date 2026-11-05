@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/maraino/gh-inbox/internal/cache"
 	"github.com/maraino/gh-inbox/internal/github"
 	"github.com/maraino/gh-inbox/internal/inbox"
+	"github.com/maraino/gh-inbox/internal/render"
 )
 
 // Execute runs the gh inbox command line with the process arguments.
@@ -44,6 +46,8 @@ type env struct {
 	// isTTY reports whether out is a terminal, and width is its width.
 	isTTY bool
 	width int
+	// forceHyperlink is the value of FORCE_HYPERLINK.
+	forceHyperlink string
 	// showProgress reports whether errOut is a terminal that can show
 	// progress.
 	showProgress bool
@@ -72,17 +76,18 @@ func defaultEnv() *env {
 		openKeyboard = openTerminalKeyboard
 	}
 	return &env{
-		out:          t.Out(),
-		errOut:       t.ErrOut(),
-		isTTY:        t.IsTerminalOutput(),
-		width:        width,
-		showProgress: term.IsTerminal(os.Stderr),
-		now:          time.Now,
-		newClient:    func(opts github.Options) (client, error) { return github.New(opts) },
-		cachePath:    cache.DefaultPath,
-		cacheDir:     defaultCacheDir,
-		rulesPath:    defaultRulesPath,
-		openKeyboard: openKeyboard,
+		out:            t.Out(),
+		errOut:         t.ErrOut(),
+		isTTY:          t.IsTerminalOutput(),
+		forceHyperlink: os.Getenv("FORCE_HYPERLINK"),
+		width:          width,
+		showProgress:   term.IsTerminal(os.Stderr),
+		now:            time.Now,
+		newClient:      func(opts github.Options) (client, error) { return github.New(opts) },
+		cachePath:      cache.DefaultPath,
+		cacheDir:       defaultCacheDir,
+		rulesPath:      defaultRulesPath,
+		openKeyboard:   openKeyboard,
 		// Finding the browser reads the gh configuration, so only do it
 		// when one is opened.
 		openBrowser: func(url string) error { return browser.New("", t.Out(), t.ErrOut()).Browse(url) },
@@ -93,7 +98,10 @@ func defaultEnv() *env {
 type rootOptions struct {
 	hostname string
 	noCache  bool
+	links    bool
 	verbose  bool
+	// rulesFile is what applySettings read, for the command to use.
+	rulesFile *loadedRules
 }
 
 func newRootCmd(e *env) *cobra.Command {
@@ -119,11 +127,18 @@ stops watching the repositories that fill the inbox.`,
 
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&opts.hostname, "hostname", "", "GitHub `host` to use (default: the gh default host)")
+	flags.BoolVar(&opts.links, "links", false,
+		"Add a clickable >> before the titles in tables, a hyperlink to the notification's page")
 	flags.BoolVar(&opts.noCache, "no-cache", false,
 		"Ignore the local record of notifications already marked as done, and cached API responses")
 	flags.BoolVar(&opts.verbose, "verbose", false, "Log API requests and retries to stderr")
 
-	cmd.AddCommand(newListCmd(opts, e), newCleanCmd(opts, e), newTriageCmd(opts, e), newUnwatchCmd(opts, e))
+	// Only these use the rules file, so help and completion work with a
+	// broken one.
+	for _, c := range []*cobra.Command{newListCmd(opts, e), newCleanCmd(opts, e), newTriageCmd(opts, e), newUnwatchCmd(opts, e)} {
+		c.PreRunE = func(cmd *cobra.Command, _ []string) error { return opts.applySettings(cmd, e) }
+		cmd.AddCommand(c)
+	}
 	return cmd
 }
 
@@ -189,6 +204,41 @@ func (o *rootOptions) webURL(n inbox.Notification) string {
 		}
 	}
 	return repo + repoPages[n.Type]
+}
+
+// applySettings fills in what the flags and the environment left to the
+// settings of the rules file, for the command about to run. A mistake in the
+// file stops it.
+func (o *rootOptions) applySettings(cmd *cobra.Command, e *env) error {
+	var file string
+	if f := cmd.Flags().Lookup(rulesFileFlag); f != nil {
+		file = f.Value.String()
+	}
+	loaded, err := e.loadRulesFile(file)
+	if err != nil {
+		return err
+	}
+	o.rulesFile = loaded
+
+	force, forceErr := strconv.ParseBool(e.forceHyperlink)
+	switch {
+	case cmd.Flags().Changed("links"):
+	case forceErr == nil:
+		o.links = force
+	default:
+		o.links = loaded.settings.Links
+	}
+	return nil
+}
+
+// writeTable writes the notifications as a table, with hyperlinks to their
+// pages when they're turned on.
+func (o *rootOptions) writeTable(e *env, notifications []inbox.Notification) error {
+	var link func(inbox.Notification) string
+	if o.links {
+		link = o.webURL
+	}
+	return render.Table(e.out, notifications, e.isTTY, e.width, e.now(), link)
 }
 
 // openCache opens the record of threads marked as done. It returns nil with

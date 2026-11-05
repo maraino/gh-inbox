@@ -29,7 +29,14 @@ type rule struct {
 
 // rulesFile is the format of the rules file.
 type rulesFile struct {
-	Rules []ruleEntry `yaml:"rules"`
+	Settings settings    `yaml:"settings"`
+	Rules    []ruleEntry `yaml:"rules"`
+}
+
+// settings are the defaults that apply to every run, with or without rules.
+type settings struct {
+	// Links adds hyperlinks to tables, as --links does.
+	Links bool `yaml:"links"`
 }
 
 type ruleEntry struct {
@@ -46,34 +53,91 @@ func defaultRulesPath() (string, error) {
 	return cache.XDGPath("XDG_CONFIG_HOME", ".config", "gh-inbox", "rules.yml")
 }
 
-// loadRules reads the rules file at path.
-func loadRules(path string) ([]rule, error) {
+// rulesFileFlag is the flag that names another rules file.
+const rulesFileFlag = "rules-file"
+
+// rulesFilePath returns the rules file to use: the one given with
+// --rules-file, if any, or the default one.
+func (e *env) rulesFilePath(given string) (string, error) {
+	if given != "" {
+		return given, nil
+	}
+	return e.rulesPath()
+}
+
+// loadedRules is what the rules file of a run has. It's read only once, before
+// the command runs: --rules-file can be a pipe, which has nothing left for a
+// second read.
+type loadedRules struct {
+	path     string
+	settings settings
+	rules    []rule
+	// missing is why there's no file to read, or nil when there's one. Only
+	// using rules needs a file.
+	missing error
+}
+
+// loadRulesFile reads the rules file: the one named by given, if any, or the
+// default one. It checks the whole file: a mistake anywhere in it stops every
+// command. No file means the default settings and no rules.
+func (e *env) loadRulesFile(given string) (*loadedRules, error) {
+	path, err := e.rulesFilePath(given)
+	if err != nil {
+		return &loadedRules{missing: err}, nil
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no rules file at %s: see \"gh inbox clean --help\" for its format", path)
+		return &loadedRules{
+			missing: fmt.Errorf("no rules file at %s: see \"gh inbox clean --help\" for its format", path),
+		}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	rules, err := parseRules(data)
+	s, rules, err := parseRulesFile(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return rules, nil
+	return &loadedRules{path: path, settings: s, rules: rules}, nil
 }
 
-// parseRules parses and checks the rules in a rules file.
-func parseRules(data []byte) ([]rule, error) {
+// parseRulesFile parses a rules file, and checks its rules.
+func parseRulesFile(data []byte) (settings, []rule, error) {
+	f, err := decodeRulesFile(data)
+	if err != nil {
+		return settings{}, nil, err
+	}
+	rules, err := f.checkedRules()
+	if err != nil {
+		return settings{}, nil, err
+	}
+	return f.Settings, rules, nil
+}
+
+// decodeRulesFile decodes a rules file, whose fields must all be known. It has
+// a single document: anything in another one wouldn't be checked or used.
+func decodeRulesFile(data []byte) (rulesFile, error) {
 	var f rulesFile
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+	if err := dec.Decode(&f); err != nil {
+		if errors.Is(err, io.EOF) {
+			return rulesFile{}, nil
+		}
+		return rulesFile{}, err
 	}
-	if len(f.Rules) == 0 {
-		return nil, errors.New("no rules")
+	var next yaml.Node
+	switch err := dec.Decode(&next); {
+	case err == nil:
+		return rulesFile{}, errors.New("more than one YAML document")
+	case !errors.Is(err, io.EOF):
+		return rulesFile{}, err
 	}
+	return f, nil
+}
 
+// checkedRules returns the rules of the file, after checking them.
+func (f *rulesFile) checkedRules() ([]rule, error) {
 	rules := make([]rule, 0, len(f.Rules))
 	seen := make(map[string]bool)
 	for i, e := range f.Rules {
@@ -167,7 +231,7 @@ type ruleFlags struct {
 func (f *ruleFlags) add(fs *pflag.FlagSet, ruleHelp, rulesHelp string) {
 	fs.StringSliceVar(&f.names, "rule", nil, ruleHelp)
 	fs.BoolVar(&f.all, "rules", false, rulesHelp)
-	fs.StringVar(&f.file, "rules-file", "", "Read the rules from `file` (default: ~/.config/gh-inbox/rules.yml)")
+	fs.StringVar(&f.file, rulesFileFlag, "", "Read the rules and settings from `file` (default: ~/.config/gh-inbox/rules.yml)")
 }
 
 // given reports whether rules were chosen.
@@ -184,23 +248,18 @@ func (f *ruleFlags) check() error {
 	return nil
 }
 
-// load reads the rules file and returns the rules chosen.
-func (f *ruleFlags) load(e *env) ([]rule, error) {
+// load returns the rules chosen from the rules file.
+func (f *ruleFlags) load(file *loadedRules) ([]rule, error) {
 	if len(f.names) > 0 && f.all {
 		return nil, errors.New("--rule and --rules can't be used together")
 	}
-	path := f.file
-	if path == "" {
-		var err error
-		if path, err = e.rulesPath(); err != nil {
-			return nil, err
-		}
+	if file.missing != nil {
+		return nil, file.missing
 	}
-	rules, err := loadRules(path)
-	if err != nil {
-		return nil, err
+	if len(file.rules) == 0 {
+		return nil, fmt.Errorf("%s: no rules", file.path)
 	}
-	return selectRules(rules, f.names)
+	return selectRules(file.rules, f.names)
 }
 
 // ruleFilters returns the filters of each rule.

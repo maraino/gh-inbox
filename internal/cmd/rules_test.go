@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -12,7 +14,7 @@ import (
 )
 
 func TestParseRules(t *testing.T) {
-	rules, err := parseRules([]byte(`
+	_, rules, err := parseRulesFile([]byte(`
 rules:
   - name: merged
     filters:
@@ -56,8 +58,8 @@ func TestParseRulesErrors(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"empty", ``, "no rules"},
-		{"no rules", `rules: []`, "no rules"},
+		{"two documents", "rules:\n  - name: a\n    filters: {type: ci}\n---\nrules:\n  - name: b\n", "more than one YAML document"},
+		{"invalid second document", "rules: []\n---\nrules: [", "yaml"},
 		{"unknown field", "rules:\n  - name: a\n    filter:\n      type: ci\n", "field filter not found"},
 		{"no name", "rules:\n  - filters:\n      type: ci\n", "rule 1 has no name"},
 		{"same name", "rules:\n  - name: a\n    filters: {type: ci}\n  - name: a\n    filters: {type: pr}\n", `rule "a" appears twice`},
@@ -73,7 +75,7 @@ func TestParseRulesErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseRules([]byte(tt.yaml))
+			_, _, err := parseRulesFile([]byte(tt.yaml))
 			if err == nil {
 				t.Fatal("got no error")
 			}
@@ -241,6 +243,8 @@ func TestCleanRulesErrors(t *testing.T) {
 		{"with all", []string{"--rules", "--all"}, "can't be combined"},
 		{"unknown rule", []string{"--rule", "merged,nope,nada,nope"}, `no rule named "nope", "nada"`},
 		{"no file", []string{"--rules", "--rules-file", missing}, "no rules file at " + missing},
+		{"empty file", []string{"--rules", "--rules-file", writeRules(t, "")}, "no rules"},
+		{"no rules", []string{"--rules", "--rules-file", writeRules(t, "rules: []")}, "no rules"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -278,12 +282,36 @@ rules:
 	}
 }
 
+func TestRulesFileIsAPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/fd")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := w.WriteString(testRules); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	path := fmt.Sprintf("/dev/fd/%d", r.Fd())
+	got := runEnv(t, newFakeInbox(), t.TempDir(), func(*env) {}, "list", "--rules", "--rules-file", path)
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.stdout == "" {
+		t.Error("stdout is empty")
+	}
+}
+
 func TestExampleRules(t *testing.T) {
 	data, err := os.ReadFile("../../examples/rules.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parseRules(data); err != nil {
+	if _, _, err := parseRulesFile(data); err != nil {
 		t.Error(err)
 	}
 }

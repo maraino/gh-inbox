@@ -81,6 +81,14 @@ browser, `d` to mark it as done, `r` to mark it as read, `u` to unsubscribe,
 pressed while a request runs are ignored, as are pasted text and keys with
 Alt, so a stray key can't act on the next notification.
 
+`--links` adds a clickable `>>` before the titles in tables, a hyperlink to the
+notification's page.
+To always have them, set `links: true` in the [rules file](#rules) or
+`FORCE_HYPERLINK=1` in the environment. `--links=false` and `FORCE_HYPERLINK=0`
+turn them off; the flag comes first, then the environment, then the setting.
+Terminals without support for them show plain text, and output to a pipe or
+file never has them.
+
 `unwatch` stops watching repositories, which is where the notifications with
 reason `subscribed` come from. Without arguments, it lists those repositories,
 most notifications first; with names or `*` patterns, it shows which ones it
@@ -159,6 +167,22 @@ Rules apply in the order of the file, and a notification only goes to the
 first rule that matches it. A rule must have filters, and a mistake in any
 rule stops them all before anything is done.
 
+The file can also have settings, which apply to every run, with or without
+rules. A file can have only settings:
+
+```yaml
+settings:
+  links: true  # the same as always passing --links
+```
+
+With `--rule` or `--rules` and `--rules-file`, the settings come from that
+file, and the ones in the default file don't apply. A file with only settings
+therefore only works as the default file.
+
+A mistake anywhere in the file, in a rule or in the settings, stops every
+command, so that nothing runs with settings other than the ones you meant.
+`help` and `completion` still work.
+
 ### Examples
 
 ```sh
@@ -232,6 +256,7 @@ the responses it gets still renew the cache.
 |---|---|
 | `--hostname` | The GitHub host, for GitHub Enterprise Server. Defaults to the `gh` default host. |
 | `--concurrency` | How many requests `clean` makes at the same time (default 4) |
+| `--links` | Add a clickable `>>` before the titles in tables |
 | `--verbose` | Log API requests and retries to stderr |
 
 Requests that hit a rate limit or a transient server error are retried.

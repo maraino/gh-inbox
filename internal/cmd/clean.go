@@ -68,6 +68,13 @@ names and values as the flags:
 
 Rules apply in the order of the file, and a notification only goes to the
 first rule it matches. A rule must have filters.
+
+Next to the rules, the file can have settings, which apply to every run:
+
+  settings:
+    links: true    # the same as always passing --links
+
+A mistake anywhere in the file stops every command.
 ` + filterHelp,
 		Example: `  # Show what marking merged and closed pull requests as done would do
   gh inbox clean --state merged,closed
@@ -157,7 +164,7 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 	}
 	if !opts.apply {
 		fmt.Fprintf(e.out, "Would %s.\n\n", describe(kind, len(sel.matched)))
-		if err := opts.show(e, sel.matched); err != nil {
+		if err := opts.show(root, e, sel.matched); err != nil {
 			return err
 		}
 		if opts.list {
@@ -176,7 +183,7 @@ func runClean(ctx context.Context, root *rootOptions, e *env, opts *cleanOptions
 	}
 
 	if len(succeeded) > 0 {
-		if err := opts.showDone(e, "", kind, succeeded); err != nil {
+		if err := opts.showDone(root, e, "", kind, succeeded); err != nil {
 			return err
 		}
 	}
@@ -195,7 +202,7 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 	case opts.concurrency < 1:
 		return errors.New("--concurrency must be at least 1")
 	}
-	rules, err := opts.rules.load(e)
+	rules, err := opts.rules.load(root.rulesFile)
 	if err != nil {
 		return err
 	}
@@ -229,7 +236,7 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 				continue
 			}
 			fmt.Fprintf(e.out, "Rule %q: Would %s.\n\n", r.name, describe(r.kind, len(matched)))
-			if err := opts.show(e, matched); err != nil {
+			if err := opts.show(root, e, matched); err != nil {
 				return err
 			}
 		}
@@ -253,7 +260,7 @@ func runCleanRules(ctx context.Context, root *rootOptions, e *env, opts *cleanOp
 			allDone = append(allDone, succeeded...)
 		}
 		if len(succeeded) > 0 {
-			if err := opts.showDone(e, fmt.Sprintf("Rule %q: ", r.name), r.kind, succeeded); err != nil {
+			if err := opts.showDone(root, e, fmt.Sprintf("Rule %q: ", r.name), r.kind, succeeded); err != nil {
 				return err
 			}
 		}
@@ -300,24 +307,24 @@ func (o *cleanOptions) lookUpListed(ctx context.Context, c client, sels []*selec
 
 // show writes the notifications clean would act on: each one, in the order
 // --sort gives, with --list, and a summary otherwise.
-func (o *cleanOptions) show(e *env, notifications []inbox.Notification) error {
+func (o *cleanOptions) show(root *rootOptions, e *env, notifications []inbox.Notification) error {
 	if o.list {
 		o.sort.sort(notifications)
-		return render.Table(e.out, notifications, e.isTTY, e.width, e.now())
+		return root.writeTable(e, notifications)
 	}
 	return render.Summary(e.out, notifications)
 }
 
 // showDone reports the notifications the action succeeded on, after a
 // heading that starts with prefix, and lists them with --list.
-func (o *cleanOptions) showDone(e *env, prefix string, kind action.Kind, succeeded []inbox.Notification) error {
+func (o *cleanOptions) showDone(root *rootOptions, e *env, prefix string, kind action.Kind, succeeded []inbox.Notification) error {
 	if !o.list {
 		fmt.Fprintf(e.out, "%s%s.\n", prefix, describePast(kind, len(succeeded)))
 		return nil
 	}
 	fmt.Fprintf(e.out, "%s%s:\n\n", prefix, describePast(kind, len(succeeded)))
 	o.sort.sort(succeeded)
-	return render.Table(e.out, succeeded, e.isTTY, e.width, e.now())
+	return root.writeTable(e, succeeded)
 }
 
 // applyAction applies the action to the notifications.

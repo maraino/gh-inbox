@@ -12,13 +12,16 @@ import (
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/tableprinter"
+	"github.com/cli/go-gh/v2/pkg/text"
 
 	"github.com/maraino/gh-inbox/internal/inbox"
 )
 
 // Table writes a row per notification. On a terminal, the columns are
-// aligned and fit in width; otherwise they are separated by tabs.
-func Table(w io.Writer, notifications []inbox.Notification, isTTY bool, width int, now time.Time) error {
+// aligned and fit in width; otherwise they are separated by tabs. On a
+// terminal, when link isn't nil, each title starts with a hyperlink to the URL
+// it returns.
+func Table(w io.Writer, notifications []inbox.Notification, isTTY bool, width int, now time.Time, link func(inbox.Notification) string) error {
 	tp := tableprinter.New(w, isTTY, width)
 	tp.AddHeader([]string{"REPO", "NUMBER", "TYPE", "STATE", "REASON", "UPDATED", "TITLE"})
 	for _, n := range notifications {
@@ -28,10 +31,33 @@ func Table(w io.Writer, notifications []inbox.Notification, isTTY bool, width in
 		tp.AddField(state(n))
 		tp.AddField(n.Reason)
 		tp.AddField(updated(n.UpdatedAt, isTTY, now))
-		tp.AddField(n.Title)
+		if isTTY && link != nil {
+			url := link(n)
+			// The table truncates what it's given without knowing about
+			// escape sequences, so only the title is truncated and the link
+			// is added to the result.
+			tp.AddField(linkText+" "+n.Title, tableprinter.WithTruncate(func(width int, _ string) string {
+				titleWidth := width - len(linkText) - 1
+				if titleWidth < 0 {
+					return hyperlink(url, text.Truncate(width, linkText))
+				}
+				return hyperlink(url, linkText) + " " + text.Truncate(titleWidth, n.Title)
+			}))
+		} else {
+			tp.AddField(n.Title)
+		}
 		tp.EndRow()
 	}
 	return tp.Render()
+}
+
+// linkText is what's clickable in a table with hyperlinks.
+const linkText = ">>"
+
+// hyperlink returns s as an OSC 8 terminal hyperlink to url. See
+// https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda.
+func hyperlink(url, s string) string {
+	return "\x1b]8;;" + url + "\x1b\\" + s + "\x1b]8;;\x1b\\"
 }
 
 // maxRepos is how many repositories a summary lists.
